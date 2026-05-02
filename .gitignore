@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/.venv/
+.venv/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment Variables
+.env
+
+# Databases & Local Tracking
+*.db
+backend/mlops.db
+backend/mlflow.db
+
+# Storage & Artifacts (Ignore uploaded data and trained models)
+backend/storage/datasets/*
+!backend/storage/datasets/.gitkeep
+backend/storage/artifacts/*
+!backend/storage/artifacts/.gitkeep
+backend/mlflow_tracking/*
+!backend/mlflow_tracking/.gitkeep
+
+# Logs
+*.log
+backend/backend.log
+backend/mlflow.log
+frontend/frontend.log
+
+# Frontend (Node)
+frontend/node_modules/
+frontend/dist/
+frontend/dist-ssr/
+frontend/*.local
+frontend/.eslintcache
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
