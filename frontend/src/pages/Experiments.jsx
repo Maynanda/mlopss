@@ -83,7 +83,17 @@ function CreateModal({ datasets, algorithms, onClose, onCreated }) {
             </div>
             <div className="form-group">
               <label className="form-label">Algorithm *</label>
-              <select className="form-select" value={form.algorithm} onChange={e => set('algorithm', e.target.value)}>
+              <select className="form-select" value={form.algorithm} onChange={e => {
+                set('algorithm', e.target.value)
+                const algo = filteredAlgos.find(a => a.algorithm_name === e.target.value)
+                if (algo && algo.hyperparams_schema) {
+                  const defaults = {}
+                  algo.hyperparams_schema.forEach(p => defaults[p.name] = p.default)
+                  set('hyperparams', JSON.stringify(defaults, null, 2))
+                } else {
+                  set('hyperparams', '{}')
+                }
+              }}>
                 <option value="">Select algorithm…</option>
                 {filteredAlgos.map(a => <option key={a.algorithm_name} value={a.algorithm_name}>{a.algorithm_name}</option>)}
               </select>
@@ -142,19 +152,50 @@ function CreateModal({ datasets, algorithms, onClose, onCreated }) {
           )}
 
           {selectedAlgo && (
-            <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 12, border: '1px solid var(--border)' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 6 }}>Default Hyperparameters</div>
-              {selectedAlgo.hyperparams_schema.map(p => (
-                <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', padding: '3px 0' }}>
-                  <span style={{ color: 'var(--accent-light)' }}>{p.name}</span>
-                  <span style={{ color: 'var(--text-secondary)' }}>{String(p.default)}</span>
-                </div>
-              ))}
+            <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 12, border: '1px solid var(--border)', marginBottom: 12 }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 12 }}>Adjust Hyperparameters</div>
+              {selectedAlgo.hyperparams_schema.map(p => {
+                let currentVal = ''
+                try {
+                  const hpObj = JSON.parse(form.hyperparams)
+                  currentVal = hpObj[p.name] !== undefined ? hpObj[p.name] : ''
+                } catch (e) {}
+                
+                return (
+                  <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', padding: '4px 0', gap: 8 }}>
+                    <span style={{ color: 'var(--accent-light)', flex: 1 }}>{p.name} <span style={{fontSize: '0.65rem', color: 'var(--text-muted)'}}>({p.type})</span></span>
+                    <input
+                      className="form-input"
+                      style={{ width: '140px', padding: '4px 8px', fontSize: '0.75rem' }}
+                      value={currentVal}
+                      placeholder={`Default: ${String(p.default)}`}
+                      onChange={e => {
+                        let hpObj = {}
+                        try { hpObj = JSON.parse(form.hyperparams) } catch (err) {}
+                        
+                        let val = e.target.value
+                        if (val !== '') {
+                          if (p.type === 'int') val = parseInt(val)
+                          else if (p.type === 'float') val = parseFloat(val)
+                          else if (p.type === 'bool') val = val === 'true' || val === '1'
+                        }
+                        
+                        if (val === '' || Number.isNaN(val)) {
+                          delete hpObj[p.name]
+                        } else {
+                          hpObj[p.name] = val
+                        }
+                        set('hyperparams', JSON.stringify(hpObj, null, 2))
+                      }}
+                    />
+                  </div>
+                )
+              })}
             </div>
           )}
           <div className="form-group">
-            <label className="form-label">Hyperparameters (JSON)</label>
-            <textarea className="form-textarea" value={form.hyperparams} onChange={e => set('hyperparams', e.target.value)} style={{ fontFamily: 'monospace', fontSize: '0.82rem' }} />
+            <label className="form-label">Hyperparameters (JSON Overrides)</label>
+            <textarea className="form-textarea" value={form.hyperparams} onChange={e => set('hyperparams', e.target.value)} style={{ fontFamily: 'monospace', fontSize: '0.82rem', minHeight: 80 }} />
           </div>
         </div>
         <div className="modal-footer">
