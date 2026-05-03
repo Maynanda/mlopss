@@ -18,6 +18,7 @@ export default function Monitoring() {
   const [explanations, setExplanations] = useState({})
 
   const [refreshInterval, setRefreshInterval] = useState(3000)
+  const [brushRange, setBrushRange] = useState({ startIndex: 0, endIndex: undefined })
 
   // Filtering State
   const [timeRange, setTimeRange] = useState('all') // 'all', '5m', '1h'
@@ -110,8 +111,21 @@ export default function Monitoring() {
     return result;
   }, [driftData, timeRange, thresholdOp, thresholdVal])
 
+  // Chart data only filters by time, NOT by threshold. This keeps the time-series line continuous.
   const chartData = useMemo(() => {
-    return filteredPredictions.map(p => {
+    if (!driftData || !driftData.predictions) return []
+    let result = driftData.predictions;
+    
+    if (timeRange !== 'all') {
+      const now = new Date()
+      const ms = timeRange === '5m' ? 5 * 60 * 1000 : 60 * 60 * 1000
+      result = result.filter(p => {
+        const d = new Date(p.timestamp.endsWith('Z') ? p.timestamp : p.timestamp + 'Z')
+        return (now - d) <= ms
+      })
+    }
+    
+    return result.map(p => {
       const d = new Date(p.timestamp.endsWith('Z') ? p.timestamp : p.timestamp + 'Z')
       const scoreVal = p.input_data._anomaly_score !== undefined ? p.input_data._anomaly_score : 
                       (p.input_data._confidence_score !== undefined ? p.input_data._confidence_score : p.prediction)
@@ -122,7 +136,21 @@ export default function Monitoring() {
         ...p.input_data
       }
     })
-  }, [filteredPredictions])
+  }, [driftData, timeRange])
+
+  const yDomain = useMemo(() => {
+    let min = 0; let max = 1;
+    chartData.forEach(d => {
+      if (d.prediction < min) min = d.prediction;
+      if (d.prediction > max) max = d.prediction;
+    });
+    if (thresholdVal !== '' && !isNaN(Number(thresholdVal))) {
+      const t = Number(thresholdVal);
+      if (t < min) min = t;
+      if (t > max) max = t;
+    }
+    return [min, max];
+  }, [chartData, thresholdVal])
 
   const features = useMemo(() => {
     if (filteredPredictions.length === 0) return []
@@ -249,13 +277,24 @@ export default function Monitoring() {
                         <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                           <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
-                          <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} domain={['auto', 'auto']} />
+                          <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} domain={yDomain} />
                           <Tooltip contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.8rem' }} />
                           <Line type="monotone" dataKey="prediction" stroke="var(--accent-light)" strokeWidth={2} dot={false} isAnimationActive={false} />
                           {thresholdVal !== '' && !isNaN(Number(thresholdVal)) && (
                             <ReferenceLine y={Number(thresholdVal)} stroke="var(--danger)" strokeDasharray="4 4" label={{ position: 'top', value: 'Threshold', fill: 'var(--danger)', fontSize: 10 }} />
                           )}
-                          <Brush dataKey="time" height={20} stroke="var(--border)" fill="var(--bg-surface)" tickFormatter={() => ''} />
+                          <Brush 
+                            dataKey="time" 
+                            height={20} 
+                            stroke="var(--border)" 
+                            fill="var(--bg-surface)" 
+                            tickFormatter={() => ''}
+                            startIndex={brushRange.startIndex}
+                            endIndex={brushRange.endIndex}
+                            onChange={(e) => {
+                              if (e) setBrushRange({ startIndex: e.startIndex, endIndex: e.endIndex })
+                            }}
+                          />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
