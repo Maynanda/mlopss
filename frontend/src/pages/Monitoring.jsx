@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Activity, RefreshCw, ActivitySquare, Filter } from 'lucide-react'
 import { monitoringApi, modelsApi, inferenceApi } from '../api/models'
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid, Brush, ReferenceLine } from 'recharts'
+import { BarChart, Bar, LineChart, Line, AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid, Brush, ReferenceLine, Legend } from 'recharts'
 import toast from 'react-hot-toast'
 
 const COLORS = ['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6']
@@ -19,11 +19,22 @@ export default function Monitoring() {
 
   const [refreshInterval, setRefreshInterval] = useState(3000)
   const [brushRange, setBrushRange] = useState({ startIndex: 0, endIndex: undefined })
+  const [hiddenFeatures, setHiddenFeatures] = useState(new Set())
+  const [independentAxes, setIndependentAxes] = useState(true)
 
   // Filtering State
   const [timeRange, setTimeRange] = useState('all') // 'all', '5m', '1h'
   const [thresholdOp, setThresholdOp] = useState('')
   const [thresholdVal, setThresholdVal] = useState('')
+
+  const toggleFeature = (f) => {
+    setHiddenFeatures(prev => {
+      const next = new Set(prev)
+      if (next.has(f)) next.delete(f)
+      else next.add(f)
+      return next
+    })
+  }
 
   const loadHealth = () => {
     Promise.all([monitoringApi.health(), monitoringApi.jobsSummary(), modelsApi.list()])
@@ -299,22 +310,69 @@ export default function Monitoring() {
                       </ResponsiveContainer>
                     </div>
 
-                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>Individual Feature Trends</div>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16, marginBottom: 24 }}>
-                      {features.map((f, i) => (
-                        <div key={f} style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 12, border: '1px solid var(--border)' }}>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{f}</span>
-                            <span style={{ color: COLORS[i % COLORS.length] }}>Avg: {(chartData.reduce((s, p) => s + (p[f] || 0), 0) / chartData.length).toFixed(2)}</span>
-                          </div>
-                          <ResponsiveContainer width="100%" height={100}>
-                            <LineChart data={chartData}>
-                              <Tooltip contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.75rem', padding: '4px 8px' }} />
-                              <Line type="monotone" dataKey={f} stroke={COLORS[i % COLORS.length]} strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                            </LineChart>
-                          </ResponsiveContainer>
-                        </div>
-                      ))}
+                    <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border)', marginBottom: 24 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                        <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)' }}>Combined Feature Trends Analysis</div>
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Overlaid metrics for correlation</span>
+                      </div>
+                      
+                      {/* Controls */}
+                      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                        <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-secondary)', marginRight: 4 }}>Features:</div>
+                        {features.map((f, i) => (
+                          <span 
+                            key={f} 
+                            onClick={() => toggleFeature(f)}
+                            style={{ 
+                              fontSize: '0.7rem', padding: '3px 10px', borderRadius: 99, cursor: 'pointer', userSelect: 'none',
+                              background: hiddenFeatures.has(f) ? 'var(--bg-elevated)' : `${COLORS[i % COLORS.length]}22`,
+                              color: hiddenFeatures.has(f) ? 'var(--text-muted)' : COLORS[i % COLORS.length],
+                              border: `1px solid ${hiddenFeatures.has(f) ? 'var(--border)' : COLORS[i % COLORS.length]}`,
+                              transition: 'all var(--transition)'
+                            }}
+                          >
+                            {f}
+                          </span>
+                        ))}
+                        <div style={{ flex: 1 }} />
+                        <label style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={independentAxes} onChange={e => setIndependentAxes(e.target.checked)} />
+                          Independent Scales
+                        </label>
+                      </div>
+
+                      <ResponsiveContainer width="100%" height={320}>
+                        <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                          <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+                          
+                          {independentAxes ? (
+                            features.filter(f => !hiddenFeatures.has(f)).map(f => (
+                              <YAxis key={`axis-${f}`} yAxisId={f} hide={true} domain={['auto', 'auto']} />
+                            ))
+                          ) : (
+                            <YAxis yAxisId="shared" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} domain={['auto', 'auto']} />
+                          )}
+
+                          <Tooltip contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.8rem' }} />
+                          
+                          {features.filter(f => !hiddenFeatures.has(f)).map((f, i) => (
+                            <Line key={f} yAxisId={independentAxes ? f : "shared"} type="monotone" dataKey={f} stroke={COLORS[i % COLORS.length]} strokeWidth={2} dot={false} isAnimationActive={false} />
+                          ))}
+                          <Brush 
+                            dataKey="time" 
+                            height={20} 
+                            stroke="var(--border)" 
+                            fill="var(--bg-surface)" 
+                            tickFormatter={() => ''}
+                            startIndex={brushRange.startIndex}
+                            endIndex={brushRange.endIndex}
+                            onChange={(e) => {
+                              if (e) setBrushRange({ startIndex: e.startIndex, endIndex: e.endIndex })
+                            }}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
                     </div>
 
                     <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border)' }}>
