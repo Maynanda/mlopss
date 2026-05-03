@@ -1,7 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Activity, RefreshCw, ActivitySquare, Filter } from 'lucide-react'
 import { monitoringApi, modelsApi, inferenceApi } from '../api/models'
-import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts'
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid, Brush, ReferenceLine } from 'recharts'
 import toast from 'react-hot-toast'
 
 const COLORS = ['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6']
@@ -31,9 +31,10 @@ export default function Monitoring() {
         setJobs(j.data)
         const prodModels = m.data.filter(x => x.stage === 'PRODUCTION')
         setModels(prodModels)
-        if (prodModels.length > 0 && !selectedModelId) {
-          setSelectedModelId(String(prodModels[0].id))
-        }
+        setSelectedModelId(prev => {
+          if (!prev && prodModels.length > 0) return String(prodModels[0].id)
+          return prev
+        })
       })
       .finally(() => setLoading(false))
   }
@@ -95,11 +96,13 @@ export default function Monitoring() {
       const v = Number(thresholdVal)
       if (!isNaN(v)) {
         result = result.filter(p => {
-          if (thresholdOp === '>') return p.prediction > v
-          if (thresholdOp === '<') return p.prediction < v
-          if (thresholdOp === '>=') return p.prediction >= v
-          if (thresholdOp === '<=') return p.prediction <= v
-          if (thresholdOp === '=') return p.prediction === v
+          const scoreVal = p.input_data._anomaly_score !== undefined ? p.input_data._anomaly_score : 
+                          (p.input_data._confidence_score !== undefined ? p.input_data._confidence_score : p.prediction)
+          if (thresholdOp === '>') return scoreVal > v
+          if (thresholdOp === '<') return scoreVal < v
+          if (thresholdOp === '>=') return scoreVal >= v
+          if (thresholdOp === '<=') return scoreVal <= v
+          if (thresholdOp === '=') return scoreVal === v
           return true
         })
       }
@@ -110,9 +113,12 @@ export default function Monitoring() {
   const chartData = useMemo(() => {
     return filteredPredictions.map(p => {
       const d = new Date(p.timestamp.endsWith('Z') ? p.timestamp : p.timestamp + 'Z')
+      const scoreVal = p.input_data._anomaly_score !== undefined ? p.input_data._anomaly_score : 
+                      (p.input_data._confidence_score !== undefined ? p.input_data._confidence_score : p.prediction)
       return {
         time: d.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-        prediction: p.prediction,
+        prediction: scoreVal,
+        actual_class: p.prediction,
         ...p.input_data
       }
     })
@@ -239,13 +245,17 @@ export default function Monitoring() {
                   <>
                     <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border)', marginBottom: 20 }}>
                       <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>Overall Prediction Trend</div>
-                      <ResponsiveContainer width="100%" height={220}>
+                      <ResponsiveContainer width="100%" height={260}>
                         <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                           <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
-                          <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+                          <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} domain={['auto', 'auto']} />
                           <Tooltip contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.8rem' }} />
                           <Line type="monotone" dataKey="prediction" stroke="var(--accent-light)" strokeWidth={2} dot={false} isAnimationActive={false} />
+                          {thresholdVal !== '' && !isNaN(Number(thresholdVal)) && (
+                            <ReferenceLine y={Number(thresholdVal)} stroke="var(--danger)" strokeDasharray="4 4" label={{ position: 'top', value: 'Threshold', fill: 'var(--danger)', fontSize: 10 }} />
+                          )}
+                          <Brush dataKey="time" height={20} stroke="var(--border)" fill="var(--bg-surface)" tickFormatter={() => ''} />
                         </LineChart>
                       </ResponsiveContainer>
                     </div>
