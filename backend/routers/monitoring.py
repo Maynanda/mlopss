@@ -87,7 +87,9 @@ def model_drift(model_id: int, db: Session = Depends(get_db)):
         # If it's a regression model, it's a number. If classification, string.
         predictions.append({
             "time": log.timestamp.strftime("%H:%M:%S"),
-            "prediction": pred_val if isinstance(pred_val, (int, float)) else 1 # default to 1 for rendering if categorical
+            "prediction": pred_val if isinstance(pred_val, (int, float)) else 1, # default to 1 for rendering if categorical
+            "raw_prediction": pred_val,
+            "input_data": log.input_data
         })
         
     feature_avgs = {k: round(v / count, 4) for k, v in feature_sums.items()}

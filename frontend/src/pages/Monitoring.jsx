@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Activity, RefreshCw, ActivitySquare } from 'lucide-react'
-import { monitoringApi, modelsApi } from '../api/models'
+import { monitoringApi, modelsApi, inferenceApi } from '../api/models'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts'
+import toast from 'react-hot-toast'
 
 const COLORS = ['#6366f1', '#06b6d4', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6']
 
@@ -12,6 +13,9 @@ export default function Monitoring() {
   const [selectedModelId, setSelectedModelId] = useState('')
   const [driftData, setDriftData] = useState(null)
   const [loading, setLoading] = useState(true)
+
+  const [explainingRow, setExplainingRow] = useState(null)
+  const [explanations, setExplanations] = useState({})
 
   const loadHealth = () => {
     Promise.all([monitoringApi.health(), monitoringApi.jobsSummary(), modelsApi.list()])
@@ -39,6 +43,18 @@ export default function Monitoring() {
   }, [selectedModelId])
 
   useEffect(() => { loadHealth(); const t = setInterval(loadHealth, 10000); return () => clearInterval(t) }, [])
+
+  const handleExplainRow = async (rowKey, inputData) => {
+    setExplainingRow(rowKey)
+    try {
+      const res = await inferenceApi.explain(selectedModelId, [inputData])
+      setExplanations(prev => ({ ...prev, [rowKey]: res.data.feature_importances }))
+    } catch(e) {
+      toast.error('Failed to calculate factors')
+    } finally {
+      setExplainingRow(null)
+    }
+  }
 
   const statusCounts = jobs.reduce((acc, j) => {
     acc[j.status] = (acc[j.status] || 0) + 1; return acc
@@ -131,32 +147,97 @@ export default function Monitoring() {
             ) : driftData.count === 0 ? (
               <div className="empty-state" style={{ padding: '40px 0' }}>No live inference data logged yet. Use the Simulator script!</div>
             ) : (
-              <div className="grid-2">
-                <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 12 }}>Prediction Trend (Last {driftData.count} requests)</div>
-                  <ResponsiveContainer width="100%" height={220}>
-                    <LineChart data={driftData.predictions} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                      <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
-                      <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
-                      <Tooltip contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.8rem' }} />
-                      <Line type="monotone" dataKey="prediction" stroke="var(--accent-light)" strokeWidth={2} dot={false} isAnimationActive={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-                
-                <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border)' }}>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 12 }}>Live Feature Averages (Drift Proxy)</div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', maxHeight: 220 }}>
-                    {Object.entries(driftData.feature_averages).map(([feature, avg]) => (
-                      <div key={feature} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{feature}</span>
-                        <span style={{ fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--emerald)' }}>{avg.toFixed(3)}</span>
-                      </div>
-                    ))}
+              <>
+                <div className="grid-2">
+                  <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 12 }}>Prediction Trend (Last {driftData.count} requests)</div>
+                    <ResponsiveContainer width="100%" height={220}>
+                      <LineChart data={driftData.predictions} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                        <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+                        <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+                        <Tooltip contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.8rem' }} />
+                        <Line type="monotone" dataKey="prediction" stroke="var(--accent-light)" strokeWidth={2} dot={false} isAnimationActive={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  
+                  <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border)' }}>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 12 }}>Live Feature Averages (Drift Proxy)</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', maxHeight: 220 }}>
+                      {Object.entries(driftData.feature_averages).map(([feature, avg]) => (
+                        <div key={feature} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{feature}</span>
+                          <span style={{ fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--emerald)' }}>{avg.toFixed(3)}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
-              </div>
+
+                <div style={{ marginTop: 24, background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border)' }}>
+                  <h3 style={{ marginBottom: 16, fontSize: '0.9rem' }}>Historical Inferences & Feature Contributions (Factors)</h3>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="data-table" style={{ fontSize: '0.8rem' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ width: 100 }}>Time</th>
+                          <th>Input Data (Historical Test)</th>
+                          <th style={{ width: 120 }}>Prediction</th>
+                          <th style={{ width: 300 }}>Feature Contributions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...driftData.predictions].reverse().slice(0, 15).map((row) => {
+                          const rowKey = row.time + JSON.stringify(row.input_data)
+                          const isExplaining = explainingRow === rowKey
+                          const expl = explanations[rowKey]
+                          
+                          return (
+                            <tr key={rowKey}>
+                              <td style={{ whiteSpace: 'nowrap' }}>{row.time}</td>
+                              <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                <pre style={{ margin: 0, fontSize: '0.7rem', background: 'transparent', padding: 0, color: 'var(--text-secondary)' }}>
+                                  {JSON.stringify(row.input_data).replace(/[{}]/g, '')}
+                                </pre>
+                              </td>
+                              <td>
+                                <span className="badge badge-success">
+                                  {typeof row.raw_prediction === 'number' ? row.raw_prediction.toFixed(4) : row.raw_prediction}
+                                </span>
+                              </td>
+                              <td>
+                                {expl ? (
+                                  <div>
+                                    {Object.entries(expl).slice(0, 4).map(([f, imp]) => (
+                                      <div key={f} style={{ marginBottom: 4 }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', marginBottom: 2 }}>
+                                          <span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{f}</span>
+                                          <span style={{ fontFamily: 'monospace' }}>{imp}%</span>
+                                        </div>
+                                        <div className="progress-bar" style={{ height: 4 }}>
+                                          <div className="progress-fill" style={{ width: `${imp}%`, background: 'var(--accent)' }} />
+                                        </div>
+                                      </div>
+                                    ))}
+                                    {Object.keys(expl).length > 4 && (
+                                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 4 }}>+ other features...</div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <button className="btn btn-secondary btn-sm" onClick={() => handleExplainRow(rowKey, row.input_data)} disabled={isExplaining}>
+                                    {isExplaining ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Analyzing...</> : 'Calculate Factors'}
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </>
             )}
           </div>
         </>
