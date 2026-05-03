@@ -17,14 +17,34 @@ function MetricsModal({ model, onClose }) {
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {Object.entries(metrics).map(([k, v]) => (
-            <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-              <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>{k}</span>
-              <span style={{ fontWeight: 600, color: 'var(--accent-light)', fontFamily: 'monospace' }}>
-                {typeof v === 'number' ? v.toFixed(4) : JSON.stringify(v)}
-              </span>
-            </div>
-          ))}
+          {Object.entries(metrics).map(([k, v]) => {
+            if (k === 'feature_importances') {
+              return (
+                <div key={k} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                  <div style={{ color: 'var(--text-secondary)', fontSize: '0.875rem', marginBottom: 8, fontWeight: 600 }}>Global Feature Importances</div>
+                  {Object.entries(v).map(([f, imp]) => (
+                    <div key={f} style={{ marginBottom: 6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: 4 }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>{f}</span>
+                        <span style={{ fontFamily: 'monospace' }}>{imp}%</span>
+                      </div>
+                      <div className="progress-bar">
+                        <div className="progress-fill" style={{ width: `${imp}%`, background: 'var(--accent)' }} />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )
+            }
+            return (
+              <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                <span style={{ color: 'var(--text-secondary)', fontSize: '0.875rem' }}>{k}</span>
+                <span style={{ fontWeight: 600, color: 'var(--accent-light)', fontFamily: 'monospace' }}>
+                  {typeof v === 'number' ? v.toFixed(4) : JSON.stringify(v)}
+                </span>
+              </div>
+            )
+          })}
           {Object.keys(metrics).length === 0 && <p>No metrics available.</p>}
         </div>
         <div className="modal-footer">

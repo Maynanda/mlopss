@@ -96,6 +96,15 @@ def _execute(db: Session, job_id: int, experiment_id: int):
     y_proba = algo.predict_proba(X)
     scores = algo.decision_scores(X)
     metrics = _compute_metrics(exp.task_type, y, y_pred, y_proba, scores, preprocessor)
+    
+    fi = algo.get_feature_importance()
+    if fi is not None and len(fi) == len(feature_cols):
+        fi_dict = {col: float(val) for col, val in zip(feature_cols, fi)}
+        total_imp = sum(fi_dict.values())
+        if total_imp > 0:
+            fi_dict = {k: round((v / total_imp) * 100, 2) for k, v in fi_dict.items()}
+            metrics["feature_importances"] = dict(sorted(fi_dict.items(), key=lambda item: item[1], reverse=True))
+
     _update_job(db, job_id, progress=85.0)
 
     # ── Persist model & preprocessor ───────────────────────────
