@@ -1,13 +1,11 @@
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { Zap, Play } from 'lucide-react'
+import { Zap, Play, Plus, X } from 'lucide-react'
 import { modelsApi, inferenceApi } from '../api/models'
 import { experimentsApi } from '../api/experiments'
 import { datasetsApi } from '../api/datasets'
 
-export default function Inference() {
-  const [models, setModels]     = useState([])
-  const [modelId, setModelId]   = useState('')
+function ModelInferencePanel({ model, onRemove }) {
   const [formData, setFormData] = useState({})
   const [result, setResult]     = useState(null)
   const [loading, setLoading]   = useState(false)
@@ -16,84 +14,63 @@ export default function Inference() {
   const [explaining, setExplaining] = useState(false)
 
   useEffect(() => {
-    modelsApi.list().then(r => {
-      const prod = r.data.filter(m => m.stage === 'PRODUCTION')
-      setModels(r.data)
-      if (prod.length > 0) setModelId(String(prod[0].id))
-      else if (r.data.length > 0) setModelId(String(r.data[0].id))
-    }).catch(() => {})
-  }, [])
-
-  const selectedModel = models.find(m => String(m.id) === modelId)
-
-  // Auto-initialize empty form when model changes
-  useEffect(() => {
-    if (selectedModel && selectedModel.feature_columns) {
+    if (model && model.feature_columns) {
       const init = {}
-      selectedModel.feature_columns.forEach(c => init[c] = '')
+      model.feature_columns.forEach(c => init[c] = '')
       setFormData(init)
       setResult(null)
+      setAutoPoll(false)
     }
-  }, [modelId])
+  }, [model])
 
   const handlePredict = async () => {
-    if (!modelId) { toast.error('Select a model first'); return }
-    if (!selectedModel || !selectedModel.feature_columns) return
-    
-    // Parse to numbers
+    if (!model || !model.feature_columns) return
     const dataRow = {}
     for (const key of Object.keys(formData)) {
       const val = formData[key]
       dataRow[key] = isNaN(val) || val === '' ? val : Number(val)
     }
-
     setLoading(true)
     setResult(null)
     try {
-      const res = await inferenceApi.predict(+modelId, [dataRow])
+      const res = await inferenceApi.predict(model.id, [dataRow])
       setResult(res.data)
-      toast.success('Prediction complete!')
-    } catch(e) { toast.error('Prediction failed') }
+      toast.success(`Prediction complete for ${model.name}!`)
+    } catch(e) { toast.error(`Prediction failed for ${model.name}`) }
     finally { setLoading(false) }
   }
 
   const handleExplain = async () => {
-    if (!modelId) { toast.error('Select a model first'); return }
-    if (!selectedModel || !selectedModel.feature_columns) return
-    
+    if (!model || !model.feature_columns) return
     const dataRow = {}
     for (const key of Object.keys(formData)) {
       const val = formData[key]
       dataRow[key] = isNaN(val) || val === '' ? val : Number(val)
     }
-
     setExplaining(true)
     try {
-      const res = await inferenceApi.explain(+modelId, [dataRow])
+      const res = await inferenceApi.explain(model.id, [dataRow])
       setResult(prev => prev ? { ...prev, explain: res.data } : { explain: res.data })
-      toast.success('Explanation complete!')
-    } catch(e) { toast.error('Explanation failed') }
+      toast.success(`Explanation complete for ${model.name}!`)
+    } catch(e) { toast.error(`Explanation failed for ${model.name}`) }
     finally { setExplaining(false) }
   }
 
   const populateExample = async () => {
-    if (!selectedModel) return
-    const cols = selectedModel.feature_columns || []
-    
+    if (!model) return
+    const cols = model.feature_columns || []
     try {
-      const expRes = await experimentsApi.get(selectedModel.experiment_id)
+      const expRes = await experimentsApi.get(model.experiment_id)
       const dsRes = await datasetsApi.preview(expRes.data.dataset_id)
       const firstRow = dsRes.data.head[0]
-      
       const example = cols.reduce((acc, c) => {
         let val = firstRow && firstRow[c] !== undefined ? firstRow[c] : 0
         if (typeof val === 'string' && !isNaN(val)) val = parseFloat(val)
         acc[c] = val
         return acc
       }, {})
-      
       setFormData(example)
-      toast.success('Loaded realistic example from training data')
+      toast.success('Loaded realistic example')
     } catch (err) {
       const example = cols.reduce((acc, c) => ({ ...acc, [c]: 0 }), {})
       setFormData(example)
@@ -101,105 +78,92 @@ export default function Inference() {
   }
 
   const fetchLiveData = async () => {
-    if (!selectedModel) return
+    if (!model) return
     try {
-      const res = await inferenceApi.getLiveData(selectedModel.id)
+      const res = await inferenceApi.getLiveData(model.id)
       if (res.data && res.data.data && res.data.data.length > 0) {
         setFormData(res.data.data[0])
-        toast.success('Polled live data stream!')
+        toast.success(`Polled live data for ${model.name}!`)
       }
     } catch (e) {
-      toast.error('Failed to poll live data')
+      toast.error(`Failed to poll live data for ${model.name}`)
     }
   }
 
-  // Handle auto-polling
   useEffect(() => {
     let t;
-    if (autoPoll && selectedModel) {
+    if (autoPoll && model) {
       t = setInterval(async () => {
         try {
-          const res = await inferenceApi.getLiveData(selectedModel.id)
+          const res = await inferenceApi.getLiveData(model.id)
           if (res.data && res.data.data && res.data.data.length > 0) {
             const newRow = res.data.data[0]
             setFormData(newRow)
-            // Predict immediately with new row
             const dataRow = {}
             for (const key of Object.keys(newRow)) {
               dataRow[key] = isNaN(newRow[key]) || newRow[key] === '' ? newRow[key] : Number(newRow[key])
             }
-            const predRes = await inferenceApi.predict(selectedModel.id, [dataRow])
+            const predRes = await inferenceApi.predict(model.id, [dataRow])
             setResult(predRes.data)
           }
         } catch(e) { console.error('Auto-poll error', e) }
       }, pollInterval)
     }
     return () => clearInterval(t)
-  }, [autoPoll, pollInterval, selectedModel])
+  }, [autoPoll, pollInterval, model])
 
   return (
-    <div>
-      <div className="page-header">
-        <div className="page-header-left">
-          <h1>Inference</h1>
-          <p>Run live predictions against deployed models</p>
-        </div>
-      </div>
-
+    <div style={{ position: 'relative', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 20, marginBottom: 24, background: 'var(--bg-elevated)', boxShadow: autoPoll ? '0 0 0 2px var(--primary)' : 'none', transition: 'all 0.3s' }}>
+      <button className="btn btn-ghost btn-sm" style={{ position: 'absolute', top: 12, right: 12 }} onClick={onRemove}><X size={16} /></button>
+      <h2 style={{ marginBottom: 16, fontSize: '1.1rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+        {autoPoll && <div className="spinner" style={{ width: 12, height: 12, borderWidth: 2, borderColor: 'var(--primary)', borderTopColor: 'transparent' }} />}
+        <span className={`badge ${model.stage === 'PRODUCTION' ? 'badge-success' : 'badge-muted'}`}>{model.stage}</span>
+        {model.name} <span style={{fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 'normal'}}>({model.algorithm})</span>
+      </h2>
+      
       <div className="grid-2">
-        {/* Input Panel */}
-        <div className="card">
+        <div className="card" style={{ boxShadow: 'none' }}>
           <h3 style={{ marginBottom: 16 }}>Prediction Request</h3>
-
-          <div className="form-group" style={{ marginBottom: 14 }}>
-            <label className="form-label">Select Model</label>
-            <select className="form-select" value={modelId} onChange={e => setModelId(e.target.value)}>
-              <option value="">Choose a model…</option>
-              {models.map(m => (
-                <option key={m.id} value={m.id}>[{m.stage}] {m.name} ({m.algorithm})</option>
-              ))}
-            </select>
-          </div>
-
-          {selectedModel && (
-            <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, marginBottom: 16, border: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>Input Features</div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  {autoPoll && (
-                    <select className="form-select" style={{ padding: '4px 8px', fontSize: '0.75rem', width: 90 }} value={pollInterval} onChange={e => setPollInterval(Number(e.target.value))}>
-                      <option value={1000}>1s</option>
-                      <option value={2000}>2s</option>
-                      <option value={5000}>5s</option>
-                    </select>
-                  )}
-                  <button className={`btn btn-sm ${autoPoll ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setAutoPoll(!autoPoll)}>
-                    <Zap size={14} style={{marginRight: 4}}/> {autoPoll ? 'Stop Auto-Poll' : 'Auto-Poll'}
-                  </button>
-                  <button className="btn btn-ghost btn-sm" onClick={populateExample}>Auto-fill from Dataset</button>
-                  {!autoPoll && <button className="btn btn-secondary btn-sm" onClick={fetchLiveData}>Fetch 1x</button>}
-                </div>
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                {(selectedModel.feature_columns || []).map(c => (
-                  <div key={c} className="form-group" style={{ marginBottom: 0 }}>
-                    <label className="form-label" style={{ fontSize: '0.75rem', marginBottom: 4 }}>{c}</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      style={{ padding: '6px 10px', fontSize: '0.8rem' }}
-                      value={formData[c] !== undefined ? formData[c] : ''}
-                      onChange={e => setFormData({ ...formData, [c]: e.target.value })}
-                      placeholder={`Enter ${c}...`}
-                    />
-                  </div>
-                ))}
+          <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, marginBottom: 16, border: '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+              <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>Input Features</div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                {autoPoll && (
+                  <select className="form-select" style={{ padding: '4px 8px', fontSize: '0.75rem', width: 90 }} value={pollInterval} onChange={e => setPollInterval(Number(e.target.value))}>
+                    <option value={1000}>1s</option>
+                    <option value={2000}>2s</option>
+                    <option value={5000}>5s</option>
+                    <option value={10000}>10s</option>
+                    <option value={30000}>30s</option>
+                    <option value={60000}>60s</option>
+                  </select>
+                )}
+                <button className={`btn btn-sm ${autoPoll ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setAutoPoll(!autoPoll)}>
+                  <Zap size={14} style={{marginRight: 4}}/> {autoPoll ? 'Stop Auto-Poll' : 'Auto-Poll'}
+                </button>
+                <button className="btn btn-ghost btn-sm" onClick={populateExample}>Auto-fill</button>
+                {!autoPoll && <button className="btn btn-secondary btn-sm" onClick={fetchLiveData}>Fetch 1x</button>}
               </div>
             </div>
-          )}
-
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              {(model.feature_columns || []).map(c => (
+                <div key={c} className="form-group" style={{ marginBottom: 0 }}>
+                  <label className="form-label" style={{ fontSize: '0.75rem', marginBottom: 4 }}>{c}</label>
+                  <input
+                    type="text"
+                    className="form-input"
+                    style={{ padding: '6px 10px', fontSize: '0.8rem' }}
+                    value={formData[c] !== undefined ? formData[c] : ''}
+                    onChange={e => setFormData({ ...formData, [c]: e.target.value })}
+                    placeholder={`Enter ${c}...`}
+                    disabled={autoPoll}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
           <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
-            <button className="btn btn-primary" onClick={handlePredict} disabled={loading} style={{ flex: 1 }}>
+            <button className="btn btn-primary" onClick={handlePredict} disabled={loading || autoPoll} style={{ flex: 1 }}>
               {loading ? <><div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />Running…</> : <><Play size={16} />Run Prediction</>}
             </button>
             <button className="btn btn-secondary" onClick={handleExplain} disabled={explaining || autoPoll} style={{ flex: 1 }}>
@@ -208,8 +172,7 @@ export default function Inference() {
           </div>
         </div>
 
-        {/* Result Panel */}
-        <div className="card">
+        <div className="card" style={{ boxShadow: 'none' }}>
           <h3 style={{ marginBottom: 16 }}>Prediction Result</h3>
           {!result ? (
             <div className="empty-state" style={{ padding: '60px 0' }}>
@@ -283,6 +246,62 @@ export default function Inference() {
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+export default function Inference() {
+  const [models, setModels] = useState([])
+  const [selectedIds, setSelectedIds] = useState([])
+
+  useEffect(() => {
+    modelsApi.list().then(r => {
+      setModels(r.data)
+      const prod = r.data.filter(m => m.stage === 'PRODUCTION')
+      if (prod.length > 0) setSelectedIds([prod[0].id])
+      else if (r.data.length > 0) setSelectedIds([r.data[0].id])
+    }).catch(() => {})
+  }, [])
+
+  const handleAddModel = (e) => {
+    const id = Number(e.target.value)
+    if (id && !selectedIds.includes(id)) {
+      setSelectedIds([id, ...selectedIds])
+    }
+    e.target.value = ""
+  }
+
+  return (
+    <div>
+      <div className="page-header" style={{ marginBottom: 24 }}>
+        <div className="page-header-left">
+          <h1>Inference Dashboard</h1>
+          <p>Run live predictions and auto-polling against multiple models simultaneously</p>
+        </div>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <select className="form-select" onChange={handleAddModel} defaultValue="">
+            <option value="" disabled>+ Add Model Panel...</option>
+            {models.map(m => (
+              <option key={m.id} value={m.id} disabled={selectedIds.includes(m.id)}>
+                [{m.stage}] {m.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {selectedIds.length === 0 ? (
+        <div className="empty-state">
+          <Zap size={40} />
+          <p style={{ marginTop: 8 }}>No models selected. Add a model from the top right to start running inference.</p>
+        </div>
+      ) : (
+        selectedIds.map(id => {
+          const m = models.find(x => x.id === id)
+          if (!m) return null
+          return <ModelInferencePanel key={id} model={m} onRemove={() => setSelectedIds(selectedIds.filter(x => x !== id))} />
+        })
+      )}
     </div>
   )
 }
