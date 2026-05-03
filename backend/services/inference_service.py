@@ -2,6 +2,7 @@
 Inference Service — loads trained models and runs predictions.
 Uses a simple in-process LRU cache to avoid reloading models on every request.
 """
+import os
 import json
 from functools import lru_cache
 from typing import Any, Dict, List, Optional, Tuple
@@ -19,10 +20,14 @@ from ml.base import BaseMLModel
 
 
 @lru_cache(maxsize=10)
-def _load_model_cached(artifact_path: str, preprocessor_path: str) -> Tuple[BaseMLModel, DataPreprocessor]:
+def _load_model_cached_internal(artifact_path: str, preprocessor_path: str, mtime: float) -> Tuple[BaseMLModel, DataPreprocessor]:
     model: BaseMLModel = joblib.load(artifact_path)
     preprocessor: DataPreprocessor = joblib.load(preprocessor_path)
     return model, preprocessor
+
+def _load_model_cached(artifact_path: str, preprocessor_path: str) -> Tuple[BaseMLModel, DataPreprocessor]:
+    mtime = os.path.getmtime(artifact_path) if os.path.exists(artifact_path) else 0.0
+    return _load_model_cached_internal(artifact_path, preprocessor_path, mtime)
 
 
 class InferenceService:
@@ -88,7 +93,7 @@ class InferenceService:
 
     def invalidate_cache(self, artifact_path: str, preprocessor_path: str):
         """Call after model update to clear cache."""
-        _load_model_cached.cache_clear()
+        _load_model_cached_internal.cache_clear()
 
 
 inference_service = InferenceService()
