@@ -17,6 +17,8 @@ export default function Monitoring() {
   const [explainingRow, setExplainingRow] = useState(null)
   const [explanations, setExplanations] = useState({})
 
+  const [refreshInterval, setRefreshInterval] = useState(3000)
+
   // Filtering State
   const [timeRange, setTimeRange] = useState('all') // 'all', '5m', '1h'
   const [thresholdOp, setThresholdOp] = useState('')
@@ -43,11 +45,19 @@ export default function Monitoring() {
       monitoringApi.drift(selectedModelId, 500).then(res => setDriftData(res.data)).catch(() => {})
     }
     fetchDrift()
-    const t = setInterval(fetchDrift, 3000)
-    return () => clearInterval(t)
-  }, [selectedModelId])
+    if (refreshInterval > 0) {
+      const t = setInterval(fetchDrift, refreshInterval)
+      return () => clearInterval(t)
+    }
+  }, [selectedModelId, refreshInterval])
 
-  useEffect(() => { loadHealth(); const t = setInterval(loadHealth, 10000); return () => clearInterval(t) }, [])
+  useEffect(() => { 
+    loadHealth(); 
+    if (refreshInterval > 0) {
+      const t = setInterval(loadHealth, Math.max(refreshInterval, 10000)); // minimum 10s for health
+      return () => clearInterval(t) 
+    }
+  }, [refreshInterval])
 
   const handleExplainRow = async (rowKey, inputData) => {
     setExplainingRow(rowKey)
@@ -75,7 +85,10 @@ export default function Monitoring() {
     if (timeRange !== 'all') {
       const now = new Date()
       const ms = timeRange === '5m' ? 5 * 60 * 1000 : 60 * 60 * 1000
-      result = result.filter(p => (now - new Date(p.timestamp)) <= ms)
+      result = result.filter(p => {
+        const d = new Date(p.timestamp.endsWith('Z') ? p.timestamp : p.timestamp + 'Z')
+        return (now - d) <= ms
+      })
     }
     
     if (thresholdOp && thresholdVal !== '') {
@@ -95,11 +108,14 @@ export default function Monitoring() {
   }, [driftData, timeRange, thresholdOp, thresholdVal])
 
   const chartData = useMemo(() => {
-    return filteredPredictions.map(p => ({
-      time: p.time,
-      prediction: p.prediction,
-      ...p.input_data
-    }))
+    return filteredPredictions.map(p => {
+      const d = new Date(p.timestamp.endsWith('Z') ? p.timestamp : p.timestamp + 'Z')
+      return {
+        time: d.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+        prediction: p.prediction,
+        ...p.input_data
+      }
+    })
   }, [filteredPredictions])
 
   const features = useMemo(() => {
@@ -120,7 +136,23 @@ export default function Monitoring() {
           <h1>Monitoring & Observability</h1>
           <p>Interactive system health, live data drift, and feature-level tracking</p>
         </div>
-        <button className="btn btn-ghost btn-sm" onClick={loadHealth}><RefreshCw size={14} />Refresh</button>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+          <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Auto-Refresh:</span>
+          <select className="form-select form-sm" style={{ width: 80, padding: '4px 20px 4px 8px' }} value={refreshInterval} onChange={e => setRefreshInterval(Number(e.target.value))}>
+            <option value={1000}>1s</option>
+            <option value={3000}>3s</option>
+            <option value={5000}>5s</option>
+            <option value={10000}>10s</option>
+            <option value={30000}>30s</option>
+            <option value={0}>Off</option>
+          </select>
+          <button className="btn btn-ghost btn-sm" onClick={() => { 
+            loadHealth(); 
+            if(selectedModelId) monitoringApi.drift(selectedModelId, 500).then(res => setDriftData(res.data)).catch(() => {});
+          }}>
+            <RefreshCw size={14} style={{marginRight: 4}}/>Refresh
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -256,7 +288,9 @@ export default function Monitoring() {
                               
                               return (
                                 <tr key={rowKey}>
-                                  <td style={{ whiteSpace: 'nowrap' }}>{row.time}</td>
+                                  <td style={{ whiteSpace: 'nowrap' }}>
+                                    {new Date(row.timestamp.endsWith('Z') ? row.timestamp : row.timestamp + 'Z').toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                                  </td>
                                   <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                     <pre style={{ margin: 0, fontSize: '0.7rem', background: 'transparent', padding: 0, color: 'var(--text-secondary)' }}>
                                       {JSON.stringify(row.input_data).replace(/[{}]/g, '')}
