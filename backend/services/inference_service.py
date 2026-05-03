@@ -68,6 +68,12 @@ class InferenceService:
                 probabilities = y_proba.tolist()
             if label_classes:
                 prediction_labels = [label_classes[int(p)] for p in predictions]
+                
+        anomaly_scores: Optional[List[float]] = None
+        if ml_model.task_type == "anomaly_detection":
+            scores = model.decision_scores(X)
+            if scores is not None:
+                anomaly_scores = scores.tolist()
 
         # Log inferences for drift detection
         for i, row_data in enumerate(data):
@@ -75,10 +81,17 @@ class InferenceService:
             pred_val = predictions[i] if prediction_labels is None else prediction_labels[i]
             if isinstance(pred_val, np.generic):
                 pred_val = pred_val.item()
+                
+            log_data = row_data.copy()
+            if anomaly_scores is not None:
+                log_data["_anomaly_score"] = float(anomaly_scores[i])
+            elif probabilities is not None and len(probabilities[i]) > 0:
+                # Also log max probability for classification
+                log_data["_confidence_score"] = float(max(probabilities[i]))
             
             log_entry = InferenceLog(
                 model_id=model_id,
-                input_data=row_data,
+                input_data=log_data,
                 prediction=pred_val
             )
             db.add(log_entry)
@@ -89,6 +102,7 @@ class InferenceService:
             "predictions": predictions,
             "prediction_labels": prediction_labels,
             "probabilities": probabilities,
+            "anomaly_scores": anomaly_scores,
         }
 
     def invalidate_cache(self, artifact_path: str, preprocessor_path: str):

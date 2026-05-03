@@ -105,3 +105,19 @@ const fetchDrift = () => {
 ```
 
 If performance degrades due to massive JSON payloads in the future, you should consider aggregating the data (e.g., downsampling into 1-minute buckets) directly inside `backend/routers/monitoring.py` before sending it to the client.
+
+---
+
+## 5. Stateful Preprocessing & Feature Store (Future Placeholder)
+
+When dealing with time-series models that require predicting ahead (e.g., forecasting 5 minutes into the future), the model often relies on stateful features such as **moving averages** or **lag time** (e.g., `feature_x_lag_1`). 
+
+Because the `/predict` endpoint is fundamentally stateless and evaluates one incoming row at a time, calculating these stateful features "on the fly" requires historical context.
+
+### **Current Implementation (Stateless)**
+Currently, the `DataPreprocessor` supports stateless `eval_exprs` (e.g., `df['c'] = df['a'] * df['b']`). To use lag features right now, you must pre-compute them in your dataset before training, and the client streaming the live data must maintain a cache to send the computed lag feature directly in the JSON payload.
+
+### **Future Feature Store Implementation**
+To support native stateful transformations, a Feature Store mechanism will be introduced in the backend:
+1. **In-Memory Cache (Redis)**: The API will maintain a sliding window (e.g., the last 10 minutes) of live events for each active model stream.
+2. **Stateful Pipeline**: The `DataPreprocessor` will be extended to automatically intercept incoming single rows, append them to the sliding window, execute time-series window functions (like `pandas.DataFrame.shift()`), and pass the fully-engineered row to the model.
