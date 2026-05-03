@@ -281,7 +281,7 @@ export default function Monitoring() {
                           <Tooltip contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.8rem' }} />
                           <Line type="monotone" dataKey="prediction" stroke="var(--accent-light)" strokeWidth={2} dot={false} isAnimationActive={false} />
                           {thresholdVal !== '' && !isNaN(Number(thresholdVal)) && (
-                            <ReferenceLine y={Number(thresholdVal)} stroke="var(--danger)" strokeDasharray="4 4" label={{ position: 'top', value: 'Threshold', fill: 'var(--danger)', fontSize: 10 }} />
+                            <ReferenceLine y={Number(thresholdVal)} stroke="var(--rose)" strokeDasharray="4 4" label={{ position: 'top', value: 'Threshold', fill: 'var(--rose)', fontSize: 10 }} />
                           )}
                           <Brush 
                             dataKey="time" 
@@ -346,9 +346,20 @@ export default function Monitoring() {
                                     </pre>
                                   </td>
                                   <td>
-                                    <span className="badge badge-success">
-                                      {typeof row.raw_prediction === 'number' ? row.raw_prediction.toFixed(4) : row.raw_prediction}
-                                    </span>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                      <span className="badge badge-success" style={{ width: 'fit-content' }}>
+                                        {(() => {
+                                          const scoreVal = row.input_data._anomaly_score !== undefined ? row.input_data._anomaly_score : 
+                                                          (row.input_data._confidence_score !== undefined ? row.input_data._confidence_score : row.raw_prediction);
+                                          return typeof scoreVal === 'number' ? scoreVal.toFixed(4) : scoreVal;
+                                        })()}
+                                      </span>
+                                      {(row.input_data._anomaly_score !== undefined || row.input_data._confidence_score !== undefined) && (
+                                        <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                                          Raw Class: {row.raw_prediction}
+                                        </span>
+                                      )}
+                                    </div>
                                   </td>
                                   <td>
                                     {expl ? (

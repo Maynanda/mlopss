@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import { inferenceApi } from '../api/models'
 
 const createTick = (modelId, get) => async () => {
@@ -20,11 +21,13 @@ const createTick = (modelId, get) => async () => {
   }
 };
 
-export const useInferenceStore = create((set, get) => ({
-  panels: {}, // { [modelId]: { formData, result, loading, explaining, autoPoll, pollInterval, intervalId } }
-  hasInitialized: false,
-  
-  setInitialized: () => set({ hasInitialized: true }),
+export const useInferenceStore = create(
+  persist(
+    (set, get) => ({
+      panels: {}, // { [modelId]: { formData, result, loading, explaining, autoPoll, pollInterval, intervalId } }
+      hasInitialized: false,
+      
+      setInitialized: () => set({ hasInitialized: true }),
   
   addPanel: (modelId, feature_columns) => {
     const panels = get().panels;
@@ -83,17 +86,49 @@ export const useInferenceStore = create((set, get) => ({
     }
   },
 
-  setPollInterval: (modelId, interval) => {
-    const p = get().panels[modelId];
-    if (!p) return;
-    
-    get().updatePanel(modelId, { pollInterval: interval });
-    
-    if (p.autoPoll) {
-      if (p.intervalId) clearInterval(p.intervalId);
-      const tick = createTick(modelId, get);
-      const newId = setInterval(tick, interval);
-      get().updatePanel(modelId, { intervalId: newId });
+      setPollInterval: (modelId, interval) => {
+        const p = get().panels[modelId];
+        if (!p) return;
+        
+        get().updatePanel(modelId, { pollInterval: interval });
+        
+        if (p.autoPoll) {
+          if (p.intervalId) clearInterval(p.intervalId);
+          const tick = createTick(modelId, get);
+          const newId = setInterval(tick, interval);
+          get().updatePanel(modelId, { intervalId: newId });
+        }
+      },
+
+      resumePolling: () => {
+        const panels = get().panels;
+        for (const [modelId, p] of Object.entries(panels)) {
+          if (p.autoPoll) {
+            if (p.intervalId) clearInterval(p.intervalId);
+            const tick = createTick(modelId, get);
+            tick();
+            const id = setInterval(tick, p.pollInterval);
+            get().updatePanel(modelId, { intervalId: id });
+          }
+        }
+      }
+    }),
+    {
+      name: 'mlops-inference-store',
+      partialize: (state) => ({
+        hasInitialized: state.hasInitialized,
+        panels: Object.fromEntries(
+          Object.entries(state.panels).map(([id, p]) => [
+            id,
+            { ...p, intervalId: null, loading: false, explaining: false }
+          ])
+        )
+      }),
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          setTimeout(() => state.resumePolling(), 500);
+        }
+      }
     }
-  }
-}));
+  )
+);
