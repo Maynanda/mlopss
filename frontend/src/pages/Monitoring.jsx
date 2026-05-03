@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Activity, RefreshCw, ActivitySquare } from 'lucide-react'
+import { useEffect, useState, useMemo } from 'react'
+import { Activity, RefreshCw, ActivitySquare, Filter } from 'lucide-react'
 import { monitoringApi, modelsApi, inferenceApi } from '../api/models'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, CartesianGrid } from 'recharts'
 import toast from 'react-hot-toast'
@@ -16,6 +16,11 @@ export default function Monitoring() {
 
   const [explainingRow, setExplainingRow] = useState(null)
   const [explanations, setExplanations] = useState({})
+
+  // Filtering State
+  const [timeRange, setTimeRange] = useState('all') // 'all', '5m', '1h'
+  const [thresholdOp, setThresholdOp] = useState('')
+  const [thresholdVal, setThresholdVal] = useState('')
 
   const loadHealth = () => {
     Promise.all([monitoringApi.health(), monitoringApi.jobsSummary(), modelsApi.list()])
@@ -35,7 +40,7 @@ export default function Monitoring() {
   useEffect(() => {
     if (!selectedModelId) return
     const fetchDrift = () => {
-      monitoringApi.drift(selectedModelId).then(res => setDriftData(res.data)).catch(() => {})
+      monitoringApi.drift(selectedModelId, 500).then(res => setDriftData(res.data)).catch(() => {})
     }
     fetchDrift()
     const t = setInterval(fetchDrift, 3000)
@@ -60,14 +65,60 @@ export default function Monitoring() {
     acc[j.status] = (acc[j.status] || 0) + 1; return acc
   }, {})
 
-  const chartData = Object.entries(statusCounts).map(([status, count]) => ({ status, count }))
+  const chartDataStatus = Object.entries(statusCounts).map(([status, count]) => ({ status, count }))
+
+  // Compute Filtered Data
+  const filteredPredictions = useMemo(() => {
+    if (!driftData || !driftData.predictions) return []
+    let result = driftData.predictions;
+    
+    if (timeRange !== 'all') {
+      const now = new Date()
+      const ms = timeRange === '5m' ? 5 * 60 * 1000 : 60 * 60 * 1000
+      result = result.filter(p => (now - new Date(p.timestamp)) <= ms)
+    }
+    
+    if (thresholdOp && thresholdVal !== '') {
+      const v = Number(thresholdVal)
+      if (!isNaN(v)) {
+        result = result.filter(p => {
+          if (thresholdOp === '>') return p.prediction > v
+          if (thresholdOp === '<') return p.prediction < v
+          if (thresholdOp === '>=') return p.prediction >= v
+          if (thresholdOp === '<=') return p.prediction <= v
+          if (thresholdOp === '=') return p.prediction === v
+          return true
+        })
+      }
+    }
+    return result;
+  }, [driftData, timeRange, thresholdOp, thresholdVal])
+
+  const chartData = useMemo(() => {
+    return filteredPredictions.map(p => ({
+      time: p.time,
+      prediction: p.prediction,
+      ...p.input_data
+    }))
+  }, [filteredPredictions])
+
+  const features = useMemo(() => {
+    if (filteredPredictions.length === 0) return []
+    return Object.keys(filteredPredictions[0].input_data).filter(k => typeof filteredPredictions[0].input_data[k] === 'number')
+  }, [filteredPredictions])
+
+  const clearFilters = () => {
+    setTimeRange('all')
+    setThresholdOp('')
+    setThresholdVal('')
+  }
 
   return (
     <div>
       <div className="page-header">
         <div className="page-header-left">
-          <h1>Monitoring</h1>
-          <p>System health, training activity, and live data drift detection</p>
+          <h1>Monitoring & Observability</h1>
+          <p>Interactive system health, live data drift, and feature-level tracking</p>
         </div>
         <button className="btn btn-ghost btn-sm" onClick={loadHealth}><RefreshCw size={14} />Refresh</button>
       </div>
@@ -90,49 +141,11 @@ export default function Monitoring() {
             ))}
           </div>
 
-          <div className="grid-2" style={{ marginBottom: 28 }}>
-            <div className="card">
-              <h3 style={{ marginBottom: 16 }}>Training Job Status Distribution</h3>
-              {chartData.length === 0 ? (
-                <div className="empty-state" style={{ padding: '40px 0' }}><Activity size={32} /><p style={{ marginTop: 8 }}>No jobs yet</p></div>
-              ) : (
-                <ResponsiveContainer width="100%" height={200}>
-                  <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                    <XAxis dataKey="status" tick={{ fill: 'var(--text-muted)', fontSize: 12 }} />
-                    <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 12 }} allowDecimals={false} />
-                    <Tooltip contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)' }} />
-                    <Bar dataKey="count" radius={[4, 4, 0, 0]}>
-                      {chartData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-
-            <div className="card">
-              <h3 style={{ marginBottom: 16 }}>System Status</h3>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {[
-                  { label: 'Backend API',       ok: !!health,                              detail: health ? 'Running on :8000' : 'Unreachable' },
-                  { label: 'MLflow Server',     ok: true,                                  detail: 'Running on :5001' },
-                  { label: 'Active Jobs',       ok: (health?.active_jobs ?? 0) === 0,      detail: `${health?.active_jobs ?? 0} running` },
-                  { label: 'Database',          ok: !!health,                              detail: 'SQLite (local)' },
-                ].map(s => (
-                  <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: s.ok ? 'var(--emerald)' : 'var(--rose)', flexShrink: 0 }} />
-                    <span style={{ flex: 1, fontSize: '0.875rem' }}>{s.label}</span>
-                    <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>{s.detail}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-
           <div className="card" style={{ marginBottom: 28 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div>
-                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><ActivitySquare size={18} color="var(--accent-light)" />Live Prediction Stream & Drift</h3>
-                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>Monitor the live output of production models in real-time</p>
+                <h3 style={{ display: 'flex', alignItems: 'center', gap: 8 }}><ActivitySquare size={18} color="var(--accent-light)" />Advanced Live Prediction Stream</h3>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: 4 }}>Monitor and filter live production model outputs across individual features</p>
               </div>
               <select className="form-select" style={{ width: 250 }} value={selectedModelId} onChange={e => setSelectedModelId(e.target.value)}>
                 <option value="">Select Production Model…</option>
@@ -145,98 +158,148 @@ export default function Monitoring() {
             ) : !driftData ? (
               <div style={{ textAlign: 'center', padding: 40 }}><div className="spinner" style={{ margin: 'auto' }} /></div>
             ) : driftData.count === 0 ? (
-              <div className="empty-state" style={{ padding: '40px 0' }}>No live inference data logged yet. Use the Simulator script!</div>
+              <div className="empty-state" style={{ padding: '40px 0' }}>No live inference data logged yet. Use the Inference dashboard to run predictions!</div>
             ) : (
               <>
-                <div className="grid-2">
-                  <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border)' }}>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 12 }}>Prediction Trend (Last {driftData.count} requests)</div>
-                    <ResponsiveContainer width="100%" height={220}>
-                      <LineChart data={driftData.predictions} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                        <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
-                        <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
-                        <Tooltip contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.8rem' }} />
-                        <Line type="monotone" dataKey="prediction" stroke="var(--accent-light)" strokeWidth={2} dot={false} isAnimationActive={false} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
+                {/* Filter Toolbar */}
+                <div style={{ display: 'flex', gap: 12, alignItems: 'center', padding: '12px 16px', background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', marginBottom: 20 }}>
+                  <Filter size={16} color="var(--text-muted)" />
+                  <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>Filters:</span>
                   
-                  <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border)' }}>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 12 }}>Live Feature Averages (Drift Proxy)</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto', maxHeight: 220 }}>
-                      {Object.entries(driftData.feature_averages).map(([feature, avg]) => (
-                        <div key={feature} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-                          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{feature}</span>
-                          <span style={{ fontSize: '0.85rem', fontFamily: 'monospace', color: 'var(--emerald)' }}>{avg.toFixed(3)}</span>
+                  <select className="form-select form-sm" style={{ width: 150 }} value={timeRange} onChange={e => setTimeRange(e.target.value)}>
+                    <option value="all">All Time (Max 500)</option>
+                    <option value="1h">Last 1 Hour</option>
+                    <option value="5m">Last 5 Minutes</option>
+                  </select>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Prediction</span>
+                    <select className="form-select form-sm" style={{ width: 60, padding: '4px 20px 4px 8px' }} value={thresholdOp} onChange={e => setThresholdOp(e.target.value)}>
+                      <option value="">Op</option>
+                      <option value=">">&gt;</option>
+                      <option value="<">&lt;</option>
+                      <option value=">=">&ge;</option>
+                      <option value="<=">&le;</option>
+                      <option value="=">=</option>
+                    </select>
+                    <input 
+                      type="number" 
+                      className="form-input form-sm" 
+                      style={{ width: 80 }} 
+                      placeholder="Value"
+                      value={thresholdVal} 
+                      onChange={e => setThresholdVal(e.target.value)} 
+                    />
+                  </div>
+
+                  {(timeRange !== 'all' || thresholdOp) && (
+                    <button className="btn btn-ghost btn-sm" onClick={clearFilters} style={{ marginLeft: 'auto' }}>Clear Filters</button>
+                  )}
+                  
+                  <span style={{ marginLeft: timeRange === 'all' && !thresholdOp ? 'auto' : 0, fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    Showing {filteredPredictions.length} results
+                  </span>
+                </div>
+
+                {filteredPredictions.length === 0 ? (
+                  <div className="empty-state" style={{ padding: '40px 0' }}>No predictions match the current filters.</div>
+                ) : (
+                  <>
+                    <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border)', marginBottom: 20 }}>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>Overall Prediction Trend</div>
+                      <ResponsiveContainer width="100%" height={220}>
+                        <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                          <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+                          <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+                          <Tooltip contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontSize: '0.8rem' }} />
+                          <Line type="monotone" dataKey="prediction" stroke="var(--accent-light)" strokeWidth={2} dot={false} isAnimationActive={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>Individual Feature Trends</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16, marginBottom: 24 }}>
+                      {features.map((f, i) => (
+                        <div key={f} style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 12, border: '1px solid var(--border)' }}>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: 8, display: 'flex', justifyContent: 'space-between' }}>
+                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{f}</span>
+                            <span style={{ color: COLORS[i % COLORS.length] }}>Avg: {(chartData.reduce((s, p) => s + (p[f] || 0), 0) / chartData.length).toFixed(2)}</span>
+                          </div>
+                          <ResponsiveContainer width="100%" height={100}>
+                            <LineChart data={chartData}>
+                              <Tooltip contentStyle={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.75rem', padding: '4px 8px' }} />
+                              <Line type="monotone" dataKey={f} stroke={COLORS[i % COLORS.length]} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                            </LineChart>
+                          </ResponsiveContainer>
                         </div>
                       ))}
                     </div>
-                  </div>
-                </div>
 
-                <div style={{ marginTop: 24, background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border)' }}>
-                  <h3 style={{ marginBottom: 16, fontSize: '0.9rem' }}>Historical Inferences & Feature Contributions (Factors)</h3>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table className="data-table" style={{ fontSize: '0.8rem' }}>
-                      <thead>
-                        <tr>
-                          <th style={{ width: 100 }}>Time</th>
-                          <th>Input Data (Historical Test)</th>
-                          <th style={{ width: 120 }}>Prediction</th>
-                          <th style={{ width: 300 }}>Feature Contributions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[...driftData.predictions].reverse().slice(0, 15).map((row) => {
-                          const rowKey = row.time + JSON.stringify(row.input_data)
-                          const isExplaining = explainingRow === rowKey
-                          const expl = explanations[rowKey]
-                          
-                          return (
-                            <tr key={rowKey}>
-                              <td style={{ whiteSpace: 'nowrap' }}>{row.time}</td>
-                              <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                                <pre style={{ margin: 0, fontSize: '0.7rem', background: 'transparent', padding: 0, color: 'var(--text-secondary)' }}>
-                                  {JSON.stringify(row.input_data).replace(/[{}]/g, '')}
-                                </pre>
-                              </td>
-                              <td>
-                                <span className="badge badge-success">
-                                  {typeof row.raw_prediction === 'number' ? row.raw_prediction.toFixed(4) : row.raw_prediction}
-                                </span>
-                              </td>
-                              <td>
-                                {expl ? (
-                                  <div>
-                                    {Object.entries(expl).slice(0, 4).map(([f, imp]) => (
-                                      <div key={f} style={{ marginBottom: 4 }}>
-                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', marginBottom: 2 }}>
-                                          <span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{f}</span>
-                                          <span style={{ fontFamily: 'monospace' }}>{imp}%</span>
-                                        </div>
-                                        <div className="progress-bar" style={{ height: 4 }}>
-                                          <div className="progress-fill" style={{ width: `${imp}%`, background: 'var(--accent)' }} />
-                                        </div>
-                                      </div>
-                                    ))}
-                                    {Object.keys(expl).length > 4 && (
-                                      <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 4 }}>+ other features...</div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <button className="btn btn-secondary btn-sm" onClick={() => handleExplainRow(rowKey, row.input_data)} disabled={isExplaining}>
-                                    {isExplaining ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Analyzing...</> : 'Calculate Factors'}
-                                  </button>
-                                )}
-                              </td>
+                    <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border)' }}>
+                      <h3 style={{ marginBottom: 16, fontSize: '0.9rem' }}>Filtered Historical Inferences & Analysis</h3>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="data-table" style={{ fontSize: '0.8rem' }}>
+                          <thead>
+                            <tr>
+                              <th style={{ width: 100 }}>Time</th>
+                              <th>Input Data (Historical Test)</th>
+                              <th style={{ width: 120 }}>Prediction</th>
+                              <th style={{ width: 300 }}>Feature Contributions</th>
                             </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                          </thead>
+                          <tbody>
+                            {[...filteredPredictions].reverse().slice(0, 15).map((row) => {
+                              const rowKey = row.time + JSON.stringify(row.input_data)
+                              const isExplaining = explainingRow === rowKey
+                              const expl = explanations[rowKey]
+                              
+                              return (
+                                <tr key={rowKey}>
+                                  <td style={{ whiteSpace: 'nowrap' }}>{row.time}</td>
+                                  <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                    <pre style={{ margin: 0, fontSize: '0.7rem', background: 'transparent', padding: 0, color: 'var(--text-secondary)' }}>
+                                      {JSON.stringify(row.input_data).replace(/[{}]/g, '')}
+                                    </pre>
+                                  </td>
+                                  <td>
+                                    <span className="badge badge-success">
+                                      {typeof row.raw_prediction === 'number' ? row.raw_prediction.toFixed(4) : row.raw_prediction}
+                                    </span>
+                                  </td>
+                                  <td>
+                                    {expl ? (
+                                      <div>
+                                        {Object.entries(expl).slice(0, 4).map(([f, imp]) => (
+                                          <div key={f} style={{ marginBottom: 4 }}>
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', marginBottom: 2 }}>
+                                              <span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{f}</span>
+                                              <span style={{ fontFamily: 'monospace' }}>{imp}%</span>
+                                            </div>
+                                            <div className="progress-bar" style={{ height: 4 }}>
+                                              <div className="progress-fill" style={{ width: `${imp}%`, background: 'var(--accent)' }} />
+                                            </div>
+                                          </div>
+                                        ))}
+                                        {Object.keys(expl).length > 4 && (
+                                          <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: 4 }}>+ other features...</div>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <button className="btn btn-secondary btn-sm" onClick={() => handleExplainRow(rowKey, row.input_data)} disabled={isExplaining}>
+                                        {isExplaining ? <><div className="spinner" style={{ width: 12, height: 12, borderWidth: 2 }} /> Analyzing...</> : 'Calculate Factors'}
+                                      </button>
+                                    )}
+                                  </td>
+                                </tr>
+                              )
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </div>
