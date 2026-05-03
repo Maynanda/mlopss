@@ -1,27 +1,23 @@
 import { useEffect, useState } from 'react'
 import toast from 'react-hot-toast'
-import { Zap, Play, Plus, X } from 'lucide-react'
+import { Zap, Play, X } from 'lucide-react'
 import { modelsApi, inferenceApi } from '../api/models'
 import { experimentsApi } from '../api/experiments'
 import { datasetsApi } from '../api/datasets'
+import { useInferenceStore } from '../store/inferenceStore'
 
 function ModelInferencePanel({ model, onRemove }) {
-  const [formData, setFormData] = useState({})
-  const [result, setResult]     = useState(null)
-  const [loading, setLoading]   = useState(false)
-  const [autoPoll, setAutoPoll] = useState(false)
-  const [pollInterval, setPollInterval] = useState(2000)
-  const [explaining, setExplaining] = useState(false)
+  const store = useInferenceStore()
+  const p = store.panels[model.id]
+  
+  if (!p) return null;
 
-  useEffect(() => {
-    if (model && model.feature_columns) {
-      const init = {}
-      model.feature_columns.forEach(c => init[c] = '')
-      setFormData(init)
-      setResult(null)
-      setAutoPoll(false)
-    }
-  }, [model])
+  const { formData, result, loading, explaining, autoPoll, pollInterval } = p;
+  
+  const setFormData = (data) => store.updatePanel(model.id, { formData: data })
+  const setLoading = (loading) => store.updatePanel(model.id, { loading })
+  const setResult = (result) => store.updatePanel(model.id, { result })
+  const setExplaining = (explaining) => store.updatePanel(model.id, { explaining })
 
   const handlePredict = async () => {
     if (!model || !model.feature_columns) return
@@ -50,7 +46,7 @@ function ModelInferencePanel({ model, onRemove }) {
     setExplaining(true)
     try {
       const res = await inferenceApi.explain(model.id, [dataRow])
-      setResult(prev => prev ? { ...prev, explain: res.data } : { explain: res.data })
+      setResult(result ? { ...result, explain: res.data } : { explain: res.data })
       toast.success(`Explanation complete for ${model.name}!`)
     } catch(e) { toast.error(`Explanation failed for ${model.name}`) }
     finally { setExplaining(false) }
@@ -90,28 +86,6 @@ function ModelInferencePanel({ model, onRemove }) {
     }
   }
 
-  useEffect(() => {
-    let t;
-    if (autoPoll && model) {
-      t = setInterval(async () => {
-        try {
-          const res = await inferenceApi.getLiveData(model.id)
-          if (res.data && res.data.data && res.data.data.length > 0) {
-            const newRow = res.data.data[0]
-            setFormData(newRow)
-            const dataRow = {}
-            for (const key of Object.keys(newRow)) {
-              dataRow[key] = isNaN(newRow[key]) || newRow[key] === '' ? newRow[key] : Number(newRow[key])
-            }
-            const predRes = await inferenceApi.predict(model.id, [dataRow])
-            setResult(predRes.data)
-          }
-        } catch(e) { console.error('Auto-poll error', e) }
-      }, pollInterval)
-    }
-    return () => clearInterval(t)
-  }, [autoPoll, pollInterval, model])
-
   return (
     <div style={{ position: 'relative', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 20, marginBottom: 24, background: 'var(--bg-elevated)', boxShadow: autoPoll ? '0 0 0 2px var(--primary)' : 'none', transition: 'all 0.3s' }}>
       <button className="btn btn-ghost btn-sm" style={{ position: 'absolute', top: 12, right: 12 }} onClick={onRemove}><X size={16} /></button>
@@ -129,16 +103,17 @@ function ModelInferencePanel({ model, onRemove }) {
               <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>Input Features</div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 {autoPoll && (
-                  <select className="form-select" style={{ padding: '4px 8px', fontSize: '0.75rem', width: 90 }} value={pollInterval} onChange={e => setPollInterval(Number(e.target.value))}>
+                  <select className="form-select" style={{ padding: '4px 8px', fontSize: '0.75rem', width: 90 }} value={pollInterval} onChange={e => store.setPollInterval(model.id, Number(e.target.value))}>
                     <option value={1000}>1s</option>
                     <option value={2000}>2s</option>
                     <option value={5000}>5s</option>
                     <option value={10000}>10s</option>
                     <option value={30000}>30s</option>
                     <option value={60000}>60s</option>
+                    <option value={300000}>5m</option>
                   </select>
                 )}
-                <button className={`btn btn-sm ${autoPoll ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setAutoPoll(!autoPoll)}>
+                <button className={`btn btn-sm ${autoPoll ? 'btn-primary' : 'btn-secondary'}`} onClick={() => store.toggleAutoPoll(model.id)}>
                   <Zap size={14} style={{marginRight: 4}}/> {autoPoll ? 'Stop Auto-Poll' : 'Auto-Poll'}
                 </button>
                 <button className="btn btn-ghost btn-sm" onClick={populateExample}>Auto-fill</button>
@@ -235,13 +210,6 @@ function ModelInferencePanel({ model, onRemove }) {
                   </div>
                 </div>
               )}
-
-              <div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>Raw Response</div>
-                <pre style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 12, fontSize: '0.78rem', overflow: 'auto', border: '1px solid var(--border)', color: 'var(--text-secondary)' }}>
-                  {JSON.stringify(result, null, 2)}
-                </pre>
-              </div>
             </div>
           )}
         </div>
@@ -252,21 +220,26 @@ function ModelInferencePanel({ model, onRemove }) {
 
 export default function Inference() {
   const [models, setModels] = useState([])
-  const [selectedIds, setSelectedIds] = useState([])
+  const store = useInferenceStore()
+  const selectedIds = Object.keys(store.panels).map(Number)
 
   useEffect(() => {
     modelsApi.list().then(r => {
       setModels(r.data)
-      const prod = r.data.filter(m => m.stage === 'PRODUCTION')
-      if (prod.length > 0) setSelectedIds([prod[0].id])
-      else if (r.data.length > 0) setSelectedIds([r.data[0].id])
+      if (!store.hasInitialized) {
+        store.setInitialized();
+        const prod = r.data.filter(m => m.stage === 'PRODUCTION')
+        if (prod.length > 0) store.addPanel(prod[0].id, prod[0].feature_columns)
+        else if (r.data.length > 0) store.addPanel(r.data[0].id, r.data[0].feature_columns)
+      }
     }).catch(() => {})
-  }, [])
+  }, [store])
 
   const handleAddModel = (e) => {
     const id = Number(e.target.value)
     if (id && !selectedIds.includes(id)) {
-      setSelectedIds([id, ...selectedIds])
+      const m = models.find(x => x.id === id)
+      if (m) store.addPanel(m.id, m.feature_columns)
     }
     e.target.value = ""
   }
@@ -299,7 +272,7 @@ export default function Inference() {
         selectedIds.map(id => {
           const m = models.find(x => x.id === id)
           if (!m) return null
-          return <ModelInferencePanel key={id} model={m} onRemove={() => setSelectedIds(selectedIds.filter(x => x !== id))} />
+          return <ModelInferencePanel key={id} model={m} onRemove={() => store.removePanel(id)} />
         })
       )}
     </div>
