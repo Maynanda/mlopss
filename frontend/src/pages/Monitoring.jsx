@@ -285,7 +285,7 @@ export default function Monitoring() {
                     <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border)', marginBottom: 20 }}>
                       <div style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>Overall Prediction Trend</div>
                       <ResponsiveContainer width="100%" height={260}>
-                        <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                        <LineChart syncId="monitoring-charts" data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                           <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
                           <YAxis tick={{ fill: 'var(--text-muted)', fontSize: 11 }} domain={yDomain} />
@@ -342,7 +342,7 @@ export default function Monitoring() {
                       </div>
 
                       <ResponsiveContainer width="100%" height={320}>
-                        <LineChart data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
+                        <LineChart syncId="monitoring-charts" data={chartData} margin={{ top: 5, right: 10, left: -20, bottom: 5 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                           <XAxis dataKey="time" tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
                           
