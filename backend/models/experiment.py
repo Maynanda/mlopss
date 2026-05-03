@@ -14,10 +14,11 @@ class Experiment(Base):
     algorithm = Column(String, nullable=False)
     task_type = Column(String, nullable=False)   # regression | classification | anomaly_detection | clustering
     target_column = Column(String, nullable=True)
-    feature_columns = Column(Text)               # JSON list
-    hyperparams = Column(Text)                   # JSON dict
+    hyperparams = Column(JSON, nullable=True)
     mlflow_experiment_id = Column(String, nullable=True)
     status = Column(String, default="created")   # created | training | completed | failed
+    feature_columns = Column(JSON, nullable=True)
+    pipeline_config = Column(JSON, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

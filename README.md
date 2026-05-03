@@ -1,78 +1,68 @@
 # MLOps Platform
 
-A full-stack MLOps platform for model training, experiment tracking, registry management, and live inference.
+A full-stack, enterprise-grade MLOps platform for automated model training, experiment tracking, registry management, data engineering, and live inference monitoring.
 
-## Stack
+## 🚀 Key Features
+
+- **Automated Training Pipeline:** Select a dataset and algorithm; the backend handles imputation, encoding, scaling, and training asynchronously.
+- **Visual Data Pipeline & Feature Engineering:** Manually select feature columns, write custom math transformations (e.g., `ratio = A / B`), and choose your scaling strategy before training.
+- **Model Registry & MLflow:** Track hyperparameters, metrics, and manage model lifecycle stages (`STAGING`, `PRODUCTION`, etc.) with built-in MLflow logging.
+- **Deep Learning Support:** Train Multi-layer Perceptron (MLP) Regressors and Classifiers.
+- **Live Inference API:** Expose your production models via REST API for instant predictions.
+- **Data Drift Monitoring:** Real-time dashboards visualizing incoming prediction streams and detecting data drift.
+- **Black-Box Model Explainability:** Built-in perturbation analysis to calculate Local Feature Importance and explain exactly *why* a model made a specific prediction.
+
+---
+
+## 🛠 Tech Stack
 
 | Layer | Technology |
 |---|---|
-| Frontend | React 18 + Vite |
-| Backend | FastAPI |
-| Experiment Tracking | MLflow |
-| ML Engine | scikit-learn |
-| Database | SQLite (→ PostgreSQL via config) |
-| State Management | Zustand |
-| Charts | Recharts |
+| **Frontend** | React 18 + Vite |
+| **Backend** | FastAPI |
+| **Experiment Tracking** | MLflow |
+| **ML Engine** | scikit-learn, pandas, numpy |
+| **Database** | SQLite (→ PostgreSQL ready via config) |
+| **State Management** | Zustand |
+| **Charts** | Recharts |
 
-## Quick Start
+---
+
+## 🚦 Quick Start
+
+Start all services (Frontend, Backend, MLflow) with one command:
 
 ```bash
 chmod +x mlops_start.sh
 ./mlops_start.sh
 ```
 
-This installs all dependencies and starts:
 - 🌐 **Frontend** → http://localhost:5173
 - ⚡ **Backend API** → http://localhost:8000
 - 📊 **MLflow UI** → http://localhost:5001
 - 📖 **API Docs** → http://localhost:8000/docs
 
-## Manual Start
+---
 
+## 📊 Simulating Live Data
+
+To test the **Monitoring** dashboard and **Data Drift** detection, you can run the provided simulator script. This script acts as an external client (like an IoT sensor or a Kafka stream), continuously sending live prediction requests to your deployed model.
+
+1. Ensure you have trained a model and set its stage to `PRODUCTION` in the Model Registry.
+2. Open a new terminal:
 ```bash
-# Terminal 1 — Backend venv
 cd backend
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --reload --port 8000
-
-# Terminal 2 — MLflow
-mlflow server --host 0.0.0.0 --port 5001 \
-  --backend-store-uri sqlite:///backend/mlflow.db
-
-# Terminal 3 — Frontend
-cd frontend
-npm install && npm run dev
+source .venv/bin/activate
+python scripts/simulate_stream.py
 ```
+3. Open the **Monitoring** page in the UI to watch the real-time prediction charts light up.
 
-## Project Structure
+---
 
-```
-ml-platform/
-├── backend/
-│   ├── main.py                  # FastAPI app entry
-│   ├── config.py                # Settings & env vars
-│   ├── database.py              # SQLAlchemy setup
-│   ├── models/                  # DB models
-│   ├── schemas/                 # Pydantic schemas
-│   ├── routers/                 # API route handlers
-│   ├── services/                # Business logic
-│   ├── ml/
-│   │   ├── base.py              # BaseMLModel abstract class
-│   │   ├── registry.py          # Auto-discovery registry
-│   │   ├── preprocessor.py      # Feature preprocessing
-│   │   ├── algorithms/          # Plug-and-play algorithms
-│   │   └── metrics/             # Per-task-type metrics
-│   └── storage/                 # Uploaded files & model artifacts
-└── frontend/
-    └── src/
-        ├── pages/               # 7 application pages
-        ├── components/          # Reusable UI components
-        ├── api/                 # Axios API clients
-        └── store/               # Zustand state stores
-```
+## 🧠 Supported Algorithms
 
-## Supported Algorithms
+### Deep Learning
+- Multi-layer Perceptron (MLP Classifier, MLP Regressor)
 
 ### Regression
 - Linear Regression, Ridge, Lasso, ElasticNet
@@ -90,53 +80,44 @@ ml-platform/
 ### Clustering
 - KMeans, DBSCAN
 
-### Future (Placeholders Ready)
-- Deep Learning: MLP, CNN, LSTM, Transformer → `ml/algorithms/deep_learning/`
-- Time Series: ARIMA, Prophet, LSTM → `ml/algorithms/time_series/`
+---
 
-## Adding a New Algorithm
-
-1. Create a file in `backend/ml/algorithms/<task_type>/`
-2. Subclass `BaseMLModel`, set `task_type` and `algorithm_name`
-3. Apply `@register` decorator
-4. Add import in `ml/registry.py` → `_load_all_algorithms()`
-
-```python
-from ml.base import BaseMLModel
-from ml.registry import register
-
-@register
-class MyNewModel(BaseMLModel):
-    task_type = "regression"
-    algorithm_name = "my_new_model"
-
-    def build(self):
-        return MyEstimator(**self.hyperparams)
-
-    def get_default_hyperparams(self):
-        return {"param1": 1.0}
-```
-
-## Switching to PostgreSQL
-
-In `backend/.env`:
-```
-DATABASE_URL=postgresql://user:password@localhost/mlops
-```
-
-## API Reference
+## 🔌 API Reference
 
 | Endpoint | Method | Description |
 |---|---|---|
 | `/api/datasets/upload` | POST | Upload CSV/JSON dataset |
-| `/api/datasets/` | GET | List all datasets |
-| `/api/datasets/{id}/preview` | GET | Preview dataset (20 rows + stats) |
-| `/api/experiments/` | POST | Create experiment |
-| `/api/experiments/{id}/train` | POST | Start training (async background) |
-| `/api/experiments/algorithms` | GET | List all available algorithms |
-| `/api/training/jobs` | GET | List training jobs |
+| `/api/experiments/` | POST | Create experiment (with Data Pipeline Config) |
+| `/api/experiments/{id}/train` | POST | Start training (async background task) |
 | `/api/models/` | GET | List all trained models |
-| `/api/models/{id}/stage` | PUT | Update model stage |
-| `/api/models/{id}/feature-importance` | GET | Get feature importances |
-| `/api/inference/{id}/predict` | POST | Run prediction |
-| `/api/monitoring/health` | GET | System health check |
+| `/api/inference/{id}/predict` | POST | Run prediction (Auto-logs for drift detection) |
+| `/api/inference/{id}/explain` | POST | Run local feature importance explanation |
+| `/api/inference/{id}/live-data`| GET | Fetch dummy sensor data matching model schema |
+| `/api/monitoring/models/{id}/drift`| GET | Fetch real-time data drift statistics |
+
+---
+
+## 🏗 Project Structure
+
+```
+ml-platform/
+├── backend/
+│   ├── main.py                  # FastAPI app entry
+│   ├── database.py              # SQLAlchemy setup
+│   ├── models/                  # DB models (Experiment, MLModel, InferenceLog)
+│   ├── schemas/                 # Pydantic schemas
+│   ├── routers/                 # API route handlers
+│   ├── services/                # Business logic (Training, Inference)
+│   ├── scripts/                 # Simulators & Data Generators
+│   ├── ml/
+│   │   ├── base.py              # BaseMLModel abstract class
+│   │   ├── registry.py          # Auto-discovery registry
+│   │   ├── preprocessor.py      # Feature engineering & scaling
+│   │   └── algorithms/          # Plug-and-play algorithms (Regression, DL, etc.)
+│   └── storage/                 # Uploaded files & model artifacts
+└── frontend/
+    └── src/
+        ├── pages/               # UI pages (Experiments, Inference, Monitoring, etc.)
+        ├── components/          # Reusable UI components
+        └── api/                 # Axios API clients
+```

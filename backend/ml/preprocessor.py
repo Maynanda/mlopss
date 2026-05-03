@@ -1,7 +1,7 @@
 from typing import List, Optional, Tuple, Dict
 import numpy as np
 import pandas as pd
-from sklearn.preprocessing import StandardScaler, OrdinalEncoder, LabelEncoder
+from sklearn.preprocessing import StandardScaler, MinMaxScaler, RobustScaler, OrdinalEncoder, LabelEncoder
 from sklearn.impute import SimpleImputer
 
 
@@ -11,12 +11,23 @@ class DataPreprocessor:
     Fit on training data, then transform inference data consistently.
     """
 
-    def __init__(self):
+    def __init__(self, pipeline_config: dict = None):
+        self.pipeline_config = pipeline_config or {}
         self.num_imputer = SimpleImputer(strategy="median")
         self.cat_encoder = OrdinalEncoder(
             handle_unknown="use_encoded_value", unknown_value=-1
         )
-        self.scaler = StandardScaler()
+        
+        scaler_type = self.pipeline_config.get("scaler", "standard").lower()
+        if scaler_type == "minmax":
+            self.scaler = MinMaxScaler()
+        elif scaler_type == "robust":
+            self.scaler = RobustScaler()
+        elif scaler_type == "none":
+            self.scaler = None
+        else:
+            self.scaler = StandardScaler()
+            
         self.label_encoder = LabelEncoder()
         self.feature_names: List[str] = []
         self.categorical_cols: List[str] = []
@@ -30,6 +41,16 @@ class DataPreprocessor:
         target_col: Optional[str] = None,
         scale: bool = True,
     ) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+        
+        # Apply custom feature engineering expressions
+        eval_exprs = self.pipeline_config.get("eval_exprs", [])
+        for expr in eval_exprs:
+            if expr.strip():
+                try:
+                    df = df.eval(expr)
+                except Exception as e:
+                    print(f"Warning: Failed to evaluate expression '{expr}': {e}")
+                    
         self.feature_names = feature_cols
         X = df[feature_cols].copy()
 
@@ -46,7 +67,7 @@ class DataPreprocessor:
             )
 
         X_arr = X.values.astype(float)
-        if scale:
+        if scale and self.scaler:
             X_arr = self.scaler.fit_transform(X_arr)
 
         self.is_fitted = True
@@ -64,6 +85,15 @@ class DataPreprocessor:
     def transform(self, df: pd.DataFrame) -> np.ndarray:
         if not self.is_fitted:
             raise ValueError("Preprocessor not fitted.")
+            
+        eval_exprs = self.pipeline_config.get("eval_exprs", [])
+        for expr in eval_exprs:
+            if expr.strip():
+                try:
+                    df = df.eval(expr)
+                except Exception as e:
+                    print(f"Warning: Failed to evaluate expression '{expr}': {e}")
+                    
         X = df[self.feature_names].copy()
         if self.numerical_cols:
             X[self.numerical_cols] = self.num_imputer.transform(X[self.numerical_cols])
@@ -72,7 +102,9 @@ class DataPreprocessor:
                 X[self.categorical_cols]
             )
         X_arr = X.values.astype(float)
-        return self.scaler.transform(X_arr)
+        if self.scaler:
+            return self.scaler.transform(X_arr)
+        return X_arr
 
     def inverse_transform_target(self, y: np.ndarray) -> np.ndarray:
         if hasattr(self.label_encoder, "classes_") and len(self.label_encoder.classes_):

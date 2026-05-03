@@ -71,13 +71,14 @@ def _execute(db: Session, job_id: int, experiment_id: int):
     df: pd.DataFrame = dataset_service.load_dataframe(ds)
     _update_job(db, job_id, progress=15.0)
 
-    feature_cols = json.loads(exp.feature_columns) if exp.feature_columns else [
+    feature_cols = exp.feature_columns if exp.feature_columns else [
         c for c in df.columns if c != exp.target_column
     ]
-    hyperparams = json.loads(exp.hyperparams) if exp.hyperparams else {}
+    hyperparams = exp.hyperparams if exp.hyperparams else {}
+    pipeline_config = exp.pipeline_config if exp.pipeline_config else {}
 
     # ── Preprocess ──────────────────────────────────────────────
-    preprocessor = DataPreprocessor()
+    preprocessor = DataPreprocessor(pipeline_config=pipeline_config)
     X, y = preprocessor.fit_transform(
         df, feature_cols, exp.target_column,
         scale=(exp.task_type != "clustering")

@@ -13,6 +13,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from models.ml_model import MLModel
+from models.inference_log import InferenceLog
 from ml.preprocessor import DataPreprocessor
 from ml.base import BaseMLModel
 
@@ -62,6 +63,21 @@ class InferenceService:
                 probabilities = y_proba.tolist()
             if label_classes:
                 prediction_labels = [label_classes[int(p)] for p in predictions]
+
+        # Log inferences for drift detection
+        for i, row_data in enumerate(data):
+            # Using standard types for JSON serialization
+            pred_val = predictions[i] if prediction_labels is None else prediction_labels[i]
+            if isinstance(pred_val, np.generic):
+                pred_val = pred_val.item()
+            
+            log_entry = InferenceLog(
+                model_id=model_id,
+                input_data=row_data,
+                prediction=pred_val
+            )
+            db.add(log_entry)
+        db.commit()
 
         return {
             "model_id": model_id,

@@ -8,15 +8,29 @@ const TASK_TYPES = ['regression', 'classification', 'anomaly_detection', 'cluste
 const STATUS_BADGE = { created: 'badge-muted', training: 'badge-warning', completed: 'badge-success', failed: 'badge-danger' }
 
 function CreateModal({ datasets, algorithms, onClose, onCreated }) {
+  const [cols, setCols] = useState([])
   const [form, setForm] = useState({
     name: '', description: '', dataset_id: '', algorithm: '',
     task_type: 'regression', target_column: '', hyperparams: '{}',
+    feature_columns: [], eval_exprs: [''], scaler: 'standard'
   })
   const [saving, setSaving] = useState(false)
-
   const filteredAlgos = algorithms.filter(a => a.task_type === form.task_type)
-
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  useEffect(() => {
+    if (form.dataset_id) {
+      datasetsApi.preview(form.dataset_id).then(res => {
+         const allCols = Object.keys(res.data.head[0] || {})
+         setCols(allCols)
+         setForm(f => ({ ...f, feature_columns: allCols.filter(c => c !== f.target_column) }))
+      })
+    } else { setCols([]) }
+  }, [form.dataset_id])
+
+  useEffect(() => {
+    setForm(f => ({ ...f, feature_columns: cols.filter(c => c !== f.target_column) }))
+  }, [form.target_column, cols])
 
   const submit = async () => {
     if (!form.name || !form.dataset_id || !form.algorithm) { toast.error('Fill required fields'); return }
@@ -29,6 +43,8 @@ function CreateModal({ datasets, algorithms, onClose, onCreated }) {
         dataset_id: +form.dataset_id, algorithm: form.algorithm,
         task_type: form.task_type,
         target_column: form.target_column || null,
+        feature_columns: form.feature_columns,
+        pipeline_config: { scaler: form.scaler, eval_exprs: form.eval_exprs.filter(e => e.trim()) },
         hyperparams: hp,
       })
       toast.success('Experiment created!')
@@ -77,6 +93,54 @@ function CreateModal({ datasets, algorithms, onClose, onCreated }) {
             <label className="form-label">Target Column {form.task_type !== 'clustering' && form.task_type !== 'anomaly_detection' ? '*' : '(optional)'}</label>
             <input className="form-input" value={form.target_column} onChange={e => set('target_column', e.target.value)} placeholder="e.g. label, price, is_fraud" />
           </div>
+
+          {cols.length > 0 && (
+            <div style={{ background: 'var(--bg-surface)', padding: 12, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)' }}>
+              <h4 style={{ marginBottom: 12, fontSize: '0.85rem' }}>Data Pipeline & Feature Engineering</h4>
+              
+              <div className="form-group">
+                <label className="form-label" style={{ fontSize: '0.75rem' }}>Selected Features</label>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {cols.filter(c => c !== form.target_column).map(c => (
+                    <label key={c} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', background: 'var(--bg-elevated)', padding: '4px 8px', borderRadius: 4, border: '1px solid var(--border)' }}>
+                      <input type="checkbox" checked={form.feature_columns.includes(c)} onChange={e => {
+                        const newCols = e.target.checked ? [...form.feature_columns, c] : form.feature_columns.filter(x => x !== c)
+                        set('feature_columns', newCols)
+                      }} />
+                      {c}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginTop: 12 }}>
+                <label className="form-label" style={{ fontSize: '0.75rem' }}>Custom Feature Transformations (Math Expressions)</label>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: 6 }}>
+                  E.g. <code>ratio = A / B</code> or <code>total = A + B</code>. These will be computed on the fly during both training and live inference!
+                </div>
+                {form.eval_exprs.map((expr, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+                    <input className="form-input" style={{ fontSize: '0.8rem', padding: '6px' }} value={expr} onChange={e => {
+                      const newExprs = [...form.eval_exprs]; newExprs[i] = e.target.value; set('eval_exprs', newExprs)
+                    }} placeholder="e.g. new_col = col_A * 2.5" />
+                    <button className="btn btn-secondary btn-sm" onClick={() => set('eval_exprs', form.eval_exprs.filter((_, idx) => idx !== i))}>✕</button>
+                  </div>
+                ))}
+                <button className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem' }} onClick={() => set('eval_exprs', [...form.eval_exprs, ''])}>+ Add Transformation</button>
+              </div>
+
+              <div className="form-group" style={{ marginTop: 12, marginBottom: 0 }}>
+                <label className="form-label" style={{ fontSize: '0.75rem' }}>Data Scaling Strategy</label>
+                <select className="form-select" style={{ fontSize: '0.8rem' }} value={form.scaler} onChange={e => set('scaler', e.target.value)}>
+                  <option value="standard">StandardScaler (Mean 0, Std 1)</option>
+                  <option value="minmax">MinMaxScaler (Range 0 to 1)</option>
+                  <option value="robust">RobustScaler (Outlier resilient)</option>
+                  <option value="none">None (No scaling)</option>
+                </select>
+              </div>
+            </div>
+          )}
+
           {selectedAlgo && (
             <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 12, border: '1px solid var(--border)' }}>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 6 }}>Default Hyperparameters</div>

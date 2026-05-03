@@ -8,9 +8,12 @@ import { datasetsApi } from '../api/datasets'
 export default function Inference() {
   const [models, setModels]     = useState([])
   const [modelId, setModelId]   = useState('')
-  const [inputJson, setInput]   = useState('[\n  {\n    "feature1": 1.0,\n    "feature2": 0.5\n  }\n]')
+  const [formData, setFormData] = useState({})
   const [result, setResult]     = useState(null)
   const [loading, setLoading]   = useState(false)
+  const [autoPoll, setAutoPoll] = useState(false)
+  const [pollInterval, setPollInterval] = useState(2000)
+  const [explaining, setExplaining] = useState(false)
 
   useEffect(() => {
     modelsApi.list().then(r => {
@@ -23,18 +26,54 @@ export default function Inference() {
 
   const selectedModel = models.find(m => String(m.id) === modelId)
 
+  // Auto-initialize empty form when model changes
+  useEffect(() => {
+    if (selectedModel && selectedModel.feature_columns) {
+      const init = {}
+      selectedModel.feature_columns.forEach(c => init[c] = '')
+      setFormData(init)
+      setResult(null)
+    }
+  }, [modelId])
+
   const handlePredict = async () => {
     if (!modelId) { toast.error('Select a model first'); return }
-    let data
-    try { data = JSON.parse(inputJson) } catch { toast.error('Invalid JSON input'); return }
-    if (!Array.isArray(data)) { toast.error('Input must be a JSON array of objects'); return }
+    if (!selectedModel || !selectedModel.feature_columns) return
+    
+    // Parse to numbers
+    const dataRow = {}
+    for (const key of Object.keys(formData)) {
+      const val = formData[key]
+      dataRow[key] = isNaN(val) || val === '' ? val : Number(val)
+    }
+
     setLoading(true)
     setResult(null)
     try {
-      const res = await inferenceApi.predict(+modelId, data)
+      const res = await inferenceApi.predict(+modelId, [dataRow])
       setResult(res.data)
       toast.success('Prediction complete!')
-    } finally { setLoading(false) }
+    } catch(e) { toast.error('Prediction failed') }
+    finally { setLoading(false) }
+  }
+
+  const handleExplain = async () => {
+    if (!modelId) { toast.error('Select a model first'); return }
+    if (!selectedModel || !selectedModel.feature_columns) return
+    
+    const dataRow = {}
+    for (const key of Object.keys(formData)) {
+      const val = formData[key]
+      dataRow[key] = isNaN(val) || val === '' ? val : Number(val)
+    }
+
+    setExplaining(true)
+    try {
+      const res = await inferenceApi.explain(+modelId, [dataRow])
+      setResult(prev => prev ? { ...prev, explain: res.data } : { explain: res.data })
+      toast.success('Explanation complete!')
+    } catch(e) { toast.error('Explanation failed') }
+    finally { setExplaining(false) }
   }
 
   const populateExample = async () => {
@@ -47,20 +86,56 @@ export default function Inference() {
       const firstRow = dsRes.data.head[0]
       
       const example = cols.reduce((acc, c) => {
-        // Use the value from the training data, parse as float if possible
         let val = firstRow && firstRow[c] !== undefined ? firstRow[c] : 0
         if (typeof val === 'string' && !isNaN(val)) val = parseFloat(val)
         acc[c] = val
         return acc
       }, {})
       
-      setInput(JSON.stringify([example], null, 2))
+      setFormData(example)
       toast.success('Loaded realistic example from training data')
     } catch (err) {
       const example = cols.reduce((acc, c) => ({ ...acc, [c]: 0 }), {})
-      setInput(JSON.stringify([example], null, 2))
+      setFormData(example)
     }
   }
+
+  const fetchLiveData = async () => {
+    if (!selectedModel) return
+    try {
+      const res = await inferenceApi.getLiveData(selectedModel.id)
+      if (res.data && res.data.data && res.data.data.length > 0) {
+        setFormData(res.data.data[0])
+        toast.success('Polled live data stream!')
+      }
+    } catch (e) {
+      toast.error('Failed to poll live data')
+    }
+  }
+
+  // Handle auto-polling
+  useEffect(() => {
+    let t;
+    if (autoPoll && selectedModel) {
+      t = setInterval(async () => {
+        try {
+          const res = await inferenceApi.getLiveData(selectedModel.id)
+          if (res.data && res.data.data && res.data.data.length > 0) {
+            const newRow = res.data.data[0]
+            setFormData(newRow)
+            // Predict immediately with new row
+            const dataRow = {}
+            for (const key of Object.keys(newRow)) {
+              dataRow[key] = isNaN(newRow[key]) || newRow[key] === '' ? newRow[key] : Number(newRow[key])
+            }
+            const predRes = await inferenceApi.predict(selectedModel.id, [dataRow])
+            setResult(predRes.data)
+          }
+        } catch(e) { console.error('Auto-poll error', e) }
+      }, pollInterval)
+    }
+    return () => clearInterval(t)
+  }, [autoPoll, pollInterval, selectedModel])
 
   return (
     <div>
@@ -87,31 +162,50 @@ export default function Inference() {
           </div>
 
           {selectedModel && (
-            <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 12, marginBottom: 14, border: '1px solid var(--border)' }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>Required Features</div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, marginBottom: 16, border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600 }}>Input Features</div>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {autoPoll && (
+                    <select className="form-select" style={{ padding: '4px 8px', fontSize: '0.75rem', width: 90 }} value={pollInterval} onChange={e => setPollInterval(Number(e.target.value))}>
+                      <option value={1000}>1s</option>
+                      <option value={2000}>2s</option>
+                      <option value={5000}>5s</option>
+                    </select>
+                  )}
+                  <button className={`btn btn-sm ${autoPoll ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setAutoPoll(!autoPoll)}>
+                    <Zap size={14} style={{marginRight: 4}}/> {autoPoll ? 'Stop Auto-Poll' : 'Auto-Poll'}
+                  </button>
+                  <button className="btn btn-ghost btn-sm" onClick={populateExample}>Auto-fill from Dataset</button>
+                  {!autoPoll && <button className="btn btn-secondary btn-sm" onClick={fetchLiveData}>Fetch 1x</button>}
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 {(selectedModel.feature_columns || []).map(c => (
-                  <code key={c} style={{ background: 'var(--accent-dim)', color: 'var(--accent-light)', padding: '2px 8px', borderRadius: 4, fontSize: '0.78rem' }}>{c}</code>
+                  <div key={c} className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label" style={{ fontSize: '0.75rem', marginBottom: 4 }}>{c}</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      style={{ padding: '6px 10px', fontSize: '0.8rem' }}
+                      value={formData[c] !== undefined ? formData[c] : ''}
+                      onChange={e => setFormData({ ...formData, [c]: e.target.value })}
+                      placeholder={`Enter ${c}...`}
+                    />
+                  </div>
                 ))}
               </div>
-              <button className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={populateExample}>Fill Example</button>
             </div>
           )}
 
-          <div className="form-group" style={{ marginBottom: 16 }}>
-            <label className="form-label">Input Data (JSON Array)</label>
-            <textarea
-              className="form-textarea"
-              value={inputJson}
-              onChange={e => setInput(e.target.value)}
-              rows={10}
-              style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.82rem' }}
-            />
+          <div style={{ display: 'flex', gap: 12, marginTop: 16 }}>
+            <button className="btn btn-primary" onClick={handlePredict} disabled={loading} style={{ flex: 1 }}>
+              {loading ? <><div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />Running…</> : <><Play size={16} />Run Prediction</>}
+            </button>
+            <button className="btn btn-secondary" onClick={handleExplain} disabled={explaining || autoPoll} style={{ flex: 1 }}>
+              {explaining ? <><div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />Explaining…</> : 'Explain Prediction'}
+            </button>
           </div>
-
-          <button className="btn btn-primary" onClick={handlePredict} disabled={loading} style={{ width: '100%' }}>
-            {loading ? <><div className="spinner" style={{ width: 16, height: 16, borderWidth: 2 }} />Running…</> : <><Play size={16} />Run Prediction</>}
-          </button>
         </div>
 
         {/* Result Panel */}
@@ -156,6 +250,26 @@ export default function Inference() {
                       ))}
                     </div>
                   ))}
+                </div>
+              )}
+
+              {result.explain && (
+                <div style={{ background: 'var(--bg-surface)', borderRadius: 'var(--radius-md)', padding: 16, border: '1px solid var(--border)' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 12 }}>Feature Importance (Local Explanation)</div>
+                  {Object.entries(result.explain.feature_importances).map(([f, imp]) => (
+                    <div key={f} style={{ marginBottom: 6 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', marginBottom: 4 }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>{f}</span>
+                        <span style={{ fontFamily: 'monospace' }}>{imp}%</span>
+                      </div>
+                      <div className="progress-bar">
+                        <div className="progress-fill" style={{ width: `${imp}%`, background: 'var(--accent)' }} />
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: 12, fontStyle: 'italic' }}>
+                    Calculated via perturbation analysis. Shows which features drove this specific prediction.
+                  </div>
                 </div>
               )}
 

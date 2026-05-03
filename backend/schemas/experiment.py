@@ -12,6 +12,7 @@ class ExperimentCreate(BaseModel):
     target_column: Optional[str] = None
     feature_columns: Optional[List[str]] = None  # None = all cols except target
     hyperparams: Optional[Dict[str, Any]] = {}
+    pipeline_config: Optional[Dict[str, Any]] = None
 
 
 class ExperimentResponse(BaseModel):
@@ -24,6 +25,7 @@ class ExperimentResponse(BaseModel):
     target_column: Optional[str]
     feature_columns: Optional[List[str]]
     hyperparams: Optional[Dict[str, Any]]
+    pipeline_config: Optional[Dict[str, Any]]
     mlflow_experiment_id: Optional[str]
     status: str
     created_at: datetime

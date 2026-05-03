@@ -33,8 +33,9 @@ def create_experiment(payload: ExperimentCreate, db: Session = Depends(get_db)):
         algorithm=payload.algorithm,
         task_type=payload.task_type,
         target_column=payload.target_column,
-        feature_columns=json.dumps(payload.feature_columns) if payload.feature_columns else None,
-        hyperparams=json.dumps(payload.hyperparams or {}),
+        feature_columns=payload.feature_columns,
+        pipeline_config=payload.pipeline_config,
+        hyperparams=payload.hyperparams or {},
         status="created",
     )
     db.add(exp)
@@ -90,6 +91,4 @@ def _get_or_404(db: Session, eid: int) -> Experiment:
 
 def _serialize(exp: Experiment) -> dict:
     d = {c.name: getattr(exp, c.name) for c in exp.__table__.columns}
-    d["feature_columns"] = json.loads(d["feature_columns"]) if d["feature_columns"] else None
-    d["hyperparams"] = json.loads(d["hyperparams"]) if d["hyperparams"] else {}
     return d
