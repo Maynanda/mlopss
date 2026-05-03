@@ -86,7 +86,7 @@ class DataPreprocessor:
         if not self.is_fitted:
             raise ValueError("Preprocessor not fitted.")
             
-        eval_exprs = self.pipeline_config.get("eval_exprs", [])
+        eval_exprs = getattr(self, "pipeline_config", {}).get("eval_exprs", [])
         for expr in eval_exprs:
             if expr.strip():
                 try:
